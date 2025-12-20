@@ -67,7 +67,7 @@ static void do_log(FILE *debug_file, const char *file, int line,
 
 ATTRIBUTE_FORMAT(printf, 5, 0)
 static void debug_vfprintf(FILE *debug_file, const char *file, int line,
-                           const char *func, const char *fmt, va_list args) {
+                          const char *func, const char *fmt, va_list args) {
   const char *bn;
   char msg[MSGLEN];
   int r;
@@ -82,11 +82,15 @@ static void debug_vfprintf(FILE *debug_file, const char *file, int line,
            (size_t) r < sizeof(msg) ? "" : "[truncated]");
 }
 
-void debug_fprintf(FILE *debug_file, const char *file, int line,
+void debug_fprintf(FILE *debug_file, int simple, const char *file, int line,
                    const char *func, const char *fmt, ...) {
   va_list ap;
-
+ 
   va_start(ap, fmt);
-  debug_vfprintf(debug_file, file, line, func, fmt, ap);
+  if (simple) {
+    vfprintf(debug_file, fmt, ap);
+  } else {
+    debug_vfprintf(debug_file, file, line, func, fmt, ap);
+  }
   va_end(ap);
 }
