@@ -4,6 +4,7 @@ add_executable(pamu2fcfg
 	pamu2fcfg.c
 	strlcpy.c
 	readpassphrase.c
+	../debug.c
 	../util.c
 	../b64.c
 	../explicit_bzero.c

@@ -82,7 +82,7 @@ static void debug_vfprintf(FILE *debug_file, const char *file, int line,
            (size_t) r < sizeof(msg) ? "" : "[truncated]");
 }
 
-void debug_printf(debug_log_t *log, int simple, const char *file, int line,
+void debug_printf(const debug_log_t *log, const char *file, int line,
                   const char *func, const char *fmt, ...) {
   va_list ap;
 
