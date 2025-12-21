@@ -29,7 +29,7 @@ typedef struct {
 
 FILE *debug_open(const char *);
 void debug_close(FILE *f);
-void debug_printf(debug_log_t *, const char *, int, const char *, const char *, ...)
+void debug_printf(const debug_log_t *, const char *, int, const char *, const char *, ...)
   ATTRIBUTE_FORMAT(printf, 5, 6);
 
 #endif /* DEBUG_H */
