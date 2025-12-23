@@ -164,13 +164,14 @@ static void reset_device(device_t *device) {
   free(device->publicKey);
   free(device->coseType);
   free(device->attributes);
+  free(device->encryptedPassword);
   memset(device, 0, sizeof(*device));
 }
 
 static int parse_native_credential(const cfg_t *cfg, char *s, device_t *cred) {
   const debug_log_t *log = &cfg->debug_log;
   const char *delim = ",";
-  const char *kh, *pk, *type, *attr;
+  const char *kh, *pk, *type, *attr, *ep;
   char *saveptr = NULL;
 
   memset(cred, 0, sizeof(*cred));
@@ -190,15 +191,20 @@ static int parse_native_credential(const cfg_t *cfg, char *s, device_t *cred) {
     cred->old_format = 1;
     type = "es256";
     attr = "+presence";
+    ep = "*";
   } else if ((attr = strtok_r(NULL, delim, &saveptr)) == NULL) {
     log_msg(log, "Empty attributes");
     attr = "";
+    ep = "*";
+  } else if ((ep = strtok_r(NULL, delim, &saveptr)) == NULL) {
+    ep = "*";
   }
 
   cred->keyHandle = cred->old_format ? normal_b64(kh) : strdup(kh);
   if (cred->keyHandle == NULL || (cred->publicKey = strdup(pk)) == NULL ||
       (cred->coseType = strdup(type)) == NULL ||
-      (cred->attributes = strdup(attr)) == NULL) {
+      (cred->attributes = strdup(attr)) == NULL ||
+      (cred->encryptedPassword = strdup(ep)) == NULL) {
     log_msg(log, "Unable to allocate memory for credential components");
     goto fail;
   }
@@ -262,6 +268,8 @@ static int parse_native_format(const cfg_t *cfg, const char *username,
                 devices[i].coseType);
         log_msg(log, "Attributes for device number %u: %s", i + 1,
                 devices[i].attributes);
+        log_msg(log, "Encrypted password for device number %u: %s", i + 1,
+                devices[i].encryptedPassword);
         i++;
       }
     }
@@ -964,14 +972,13 @@ static int match_device_opts(fido_dev_t *dev, struct opts *opts) {
   return 1;
 }
 
-static int set_opts(const cfg_t *cfg, const struct opts *opts,
+static int set_opts(const debug_log_t *log, fido_opt_t up, fido_opt_t uv,
                     fido_assert_t *assert) {
-  const debug_log_t *log = &cfg->debug_log;
-  if (fido_assert_set_up(assert, opts->up) != FIDO_OK) {
+  if (fido_assert_set_up(assert, up) != FIDO_OK) {
     log_msg(log, "Failed to set UP");
     return 0;
   }
-  if (fido_assert_set_uv(assert, opts->uv) != FIDO_OK) {
+  if (fido_assert_set_uv(assert, uv) != FIDO_OK) {
     log_msg(log, "Failed to set UV");
     return 0;
   }
@@ -979,8 +986,7 @@ static int set_opts(const cfg_t *cfg, const struct opts *opts,
   return 1;
 }
 
-static int set_cdh(const cfg_t *cfg, fido_assert_t *assert) {
-  const debug_log_t *log = &cfg->debug_log;
+static int set_cdh(const debug_log_t *log, fido_assert_t *assert) {
   unsigned char cdh[32];
   int r;
 
@@ -998,12 +1004,10 @@ static int set_cdh(const cfg_t *cfg, fido_assert_t *assert) {
   return 1;
 }
 
-static fido_assert_t *prepare_assert(const cfg_t *cfg, const device_t *device,
-                                     const struct opts *opts) {
-  const debug_log_t *log = &cfg->debug_log;
+fido_assert_t *prepare_assert(const debug_log_t *log, const char* rp,
+                              const unsigned char* kh, size_t kh_len,
+                              fido_opt_t up, fido_opt_t uv) {
   fido_assert_t *assert = NULL;
-  unsigned char *buf = NULL;
-  size_t buf_len;
   int ok = 0;
   int r;
 
@@ -1012,38 +1016,26 @@ static fido_assert_t *prepare_assert(const cfg_t *cfg, const device_t *device,
     goto err;
   }
 
-  if (device->old_format)
-    r = fido_assert_set_rp(assert, cfg->appid);
-  else
-    r = fido_assert_set_rp(assert, cfg->origin);
-
+  r = fido_assert_set_rp(assert, rp);
   if (r != FIDO_OK) {
     log_msg(log, "Unable to set relying party: %s (%d)", fido_strerr(r), r);
     goto err;
   }
 
-  if (is_resident(device->keyHandle)) {
-    log_msg(log, "Credential is resident");
-  } else {
-    log_msg(log, "Key handle: %s", device->keyHandle);
-    if (!b64_decode(device->keyHandle, (void **) &buf, &buf_len)) {
-      log_msg(log, "Failed to decode key handle");
-      goto err;
-    }
-
-    r = fido_assert_allow_cred(assert, buf, buf_len);
+  if (kh != NULL) {
+    r = fido_assert_allow_cred(assert, kh, kh_len);
     if (r != FIDO_OK) {
       log_msg(log, "Unable to set keyHandle: %s (%d)", fido_strerr(r), r);
       goto err;
     }
   }
 
-  if (!set_opts(cfg, opts, assert)) {
+  if (!set_opts(log, up, uv, assert)) {
     log_msg(log, "Failed to set assert options");
     goto err;
   }
 
-  if (!set_cdh(cfg, assert)) {
+  if (!set_cdh(log, assert)) {
     log_msg(log, "Failed to set client data hash");
     goto err;
   }
@@ -1054,6 +1046,33 @@ err:
   if (!ok)
     fido_assert_free(&assert);
 
+  return assert;
+}
+
+static fido_assert_t* prepare_assert_using_device(const cfg_t *cfg, const device_t *device,
+                                                  const struct opts *opts)
+{
+  const debug_log_t *log = &cfg->debug_log;
+  fido_assert_t *assert = NULL;
+  const char* rp;
+  unsigned char *buf = NULL;
+  size_t buf_len = 0;
+  
+  rp = device->old_format ? cfg->appid : cfg->origin;
+
+  if (is_resident(device->keyHandle)) {
+    log_msg(log, "Credential is resident\n");
+  } else {
+    log_msg(log, "Key handle: %s", device->keyHandle);
+    if (!b64_decode(device->keyHandle, (void **) &buf, &buf_len)) {
+      log_msg(log, "Failed to decode key handle\n");
+      goto err;
+    }
+  }
+  
+  assert = prepare_assert(log, rp, buf, buf_len, opts->up, opts->uv);
+
+err:
   free(buf);
 
   return assert;
@@ -1225,7 +1244,7 @@ int do_authentication(const cfg_t *cfg, const device_t *devices,
     log_msg(log, "Attempting authentication with device number %d", i + 1);
 
     init_opts(&opts); /* used during authenticator discovery */
-    assert = prepare_assert(cfg, &devices[i], &opts);
+    assert = prepare_assert_using_device(cfg, &devices[i], &opts);
     if (assert == NULL) {
       log_msg(log, "Failed to prepare assert");
       goto out;
@@ -1251,12 +1270,12 @@ int do_authentication(const cfg_t *cfg, const device_t *devices,
           continue;
         }
 
-        if (!set_opts(cfg, &opts, assert)) {
+        if (!set_opts(log, opts.up, opts.uv, assert)) {
           log_msg(log, "Failed to set assert options");
           goto out;
         }
 
-        if (!set_cdh(cfg, assert)) {
+        if (!set_cdh(log, assert)) {
           log_msg(log, "Failed to reset client data hash");
           goto out;
         }
@@ -1577,4 +1596,21 @@ int random_bytes(void *buf, size_t cnt) {
     return (0);
 
   return (1);
+}
+
+char *format(const char *fmt, ...) {
+  va_list ap_scan, ap_format;
+  size_t count;
+  char *out = NULL;
+
+  va_start(ap_scan, fmt);
+  va_copy(ap_format, ap_scan);
+  count = vsnprintf(NULL, 0, fmt, ap_scan);
+  out = malloc(count + 1);
+  if (out)
+    vsnprintf(out, count + 1, fmt, ap_format);
+  va_end(ap_scan);
+  va_end(ap_format);
+
+  return out;
 }

@@ -7,6 +7,7 @@ add_executable(pamu2fcfg
 	../debug.c
 	../util.c
 	../b64.c
+	../crypt.c
 	../explicit_bzero.c
 )
 
