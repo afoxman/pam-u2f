@@ -4,6 +4,7 @@
 
 #include <openssl/err.h>
 #include <openssl/evp.h>
+#include <openssl/rand.h>
 #include <string.h>
 
 #include "b64.h"
@@ -12,6 +13,23 @@
 
 #define EP_FMT "salt=%s|iv=%s|ep=%s"
 
+#define CALLMSG(f,m) \
+  do { \
+    if (!(f)) { \
+      log_msg(log, "error: %s: %s (%d)\n", (m), strerror(errno), errno); \
+      goto err; \
+    } \
+  } while (0)
+
+#define CALL(f) CALLMSG(f, #f)
+
+#define CALL_OSSL(f) \
+  do { \
+    if ((long)(f) < 1) { \
+      log_ossl_error(log, #f); \
+      goto err; \
+    } \
+  } while (0)
 
 static void log_ossl_error(const debug_log_t *log, const char *api) {
   unsigned long error;
@@ -22,103 +40,87 @@ static void log_ossl_error(const debug_log_t *log, const char *api) {
   log_msg(log, "error: %s: %s (%lu)\n", api, error_string, error);
 }
 
+bool generate_ep_params(const debug_log_t *log, ep_params_t *ep_params) {
+  bool result = false;
+  CALL_OSSL(RAND_bytes(ep_params->hmac_salt, sizeof(ep_params->hmac_salt)));
+  CALL_OSSL(RAND_bytes(ep_params->iv, sizeof(ep_params->iv)));
+  result = true;
+err:
+  return result;
+}
 
-char *encrypt_password(const debug_log_t *log,
-                     const void *hmac_salt, size_t hmac_salt_len, 
-                     const void *iv, size_t iv_len,
-                     const void *key, size_t key_len,
-                     const char *password) {
+bool encrypt_password(const debug_log_t *log, const ep_params_t *ep_params,
+                      const unsigned char* hmac_secret, size_t hmac_secret_len,
+                      const char *password, unsigned char **ep, size_t *ep_len) {
+  bool result = false;
   int password_len;
   size_t encrypted_size;
   unsigned char *encrypted = NULL;
   size_t encrypted_len = 0;
   EVP_CIPHER_CTX *ctx = NULL;
   int count;
+
+  if (hmac_secret_len != HMAC_SECRET_SIZE) {
+    log_msg(log, "error: invalid hmac_secret_len %zu, expected %d\n", hmac_secret_len, HMAC_SECRET_SIZE);
+    goto err;
+  }
+  password_len = (int)strlen(password);
+
+  encrypted_size = sizeof(ep_params->iv) + (((password_len + 15) / 16) * 16);
+  CALL(encrypted = malloc(encrypted_size));
+
+  CALL_OSSL(ctx = EVP_CIPHER_CTX_new());
+  CALL_OSSL(EVP_EncryptInit_ex(ctx, EVP_aes_256_cbc(), NULL, hmac_secret, ep_params->iv));
+  CALL_OSSL(EVP_EncryptUpdate(ctx, encrypted, &count, (const unsigned char *)password, password_len));
+  encrypted_len += count;
+  CALLMSG(encrypted_len <= encrypted_size, "encryption buffer overflow");
+
+  CALL_OSSL(EVP_EncryptFinal_ex(ctx, encrypted + encrypted_len, &count));
+  encrypted_len += count;
+  CALLMSG(encrypted_len <= encrypted_size, "encryption buffer overflow");
+
+  *ep = encrypted;
+  *ep_len = encrypted_len;
+  encrypted = NULL;
+  result = true;
+
+err:
+  free(encrypted);
+  if (ctx != NULL)
+    EVP_CIPHER_CTX_free(ctx);
+
+  return result;
+}
+
+char *serialize_ep(const debug_log_t *log, const ep_params_t *ep_params,
+                   const unsigned char *ep, size_t ep_len) {
   char *b64_salt = NULL;
   char *b64_iv = NULL;
   char *b64_ep = NULL;
-  char *ep = NULL;
+  char *formatted = NULL;
 
-  if (iv_len != 16) {
-    log_msg(log, "error: initialization vector length must be 16 bytes for AES-256-CBC\n");
-    goto err;
-  }
-  if (key_len != 32) {
-    log_msg(log, "error: key length must be 32 bytes for AES-256-CBC\n");
-    goto err;
-  }
-
-  password_len = (int)strlen(password);
-
-  encrypted_size = iv_len + (((password_len + 15) / 16) * 16);
-  encrypted = malloc(encrypted_size);
-  if (!encrypted) {
-    log_msg(log, "error: failed to allocate encrypted password buffer\n");
-    goto err;
-  }
-
-  if (!(ctx = EVP_CIPHER_CTX_new())) {
-    log_ossl_error(log, "EVP_CIPHER_CTX_new");
-    goto err;
-  }
-
-  if (1 != EVP_EncryptInit_ex(ctx, EVP_aes_256_cbc(), NULL, key, iv)) {
-    log_ossl_error(log, "EVP_EncryptInit_ex(EVP_aes_256_cbc)");
-    goto err;
-  }
-
-  if (1 != EVP_EncryptUpdate(ctx, encrypted, &count, (const unsigned char *)password, password_len)) {
-    log_ossl_error(log, "EVP_EncryptUpdate");
-    goto err;    
-  }
-  encrypted_len += count;
-  if (encrypted_len > encrypted_size) {
-    log_msg(log, "error: encryption buffer overflow\n");
-    goto err;
-  }
-
-  if (1 != EVP_EncryptFinal_ex(ctx, encrypted + encrypted_len, &count)) {
-    log_ossl_error(log, "EVP_EncryptFinal_ex");
-    goto err;    
-  }
-  encrypted_len += count;
-  if (encrypted_len > encrypted_size) {
-    log_msg(log, "error: encryption buffer overflow\n");
-    goto err;
-  }
-
-  if (!b64_encode(hmac_salt, hmac_salt_len, &b64_salt) ||
-      !b64_encode(iv, iv_len, &b64_iv) ||
-      !b64_encode(encrypted, encrypted_len, &b64_ep)) {
-    log_msg(log, "error: failed to base64-encode encrypted password data\n");
-    goto err;
-  }
-
-  if (!(ep = format(EP_FMT, b64_salt, b64_iv, b64_ep))) {
-    log_msg(log, "error: failed to allocate formatted output\n");
-    goto err;
-  }
+  CALL(b64_encode(ep_params->hmac_salt, sizeof(ep_params->hmac_salt), &b64_salt));
+  CALL(b64_encode(ep_params->iv, sizeof(ep_params->iv), &b64_iv));
+  CALL(b64_encode(ep, ep_len, &b64_ep));
+  CALL(formatted = format(EP_FMT, b64_salt, b64_iv, b64_ep));
 
 err:
   free(b64_ep);
   free(b64_iv);
   free(b64_salt);
-  if (encrypted != NULL) {
-    explicit_bzero(encrypted, encrypted_len);
-    free(encrypted);
-  }
-  if (ctx != NULL)
-    EVP_CIPHER_CTX_free(ctx);
 
-  return ep;
+  return formatted;
 }
 
-
+/*
 // https://wiki.openssl.org/index.php/EVP_Symmetric_Encryption_and_Decryption
 
 int decrypt(unsigned char *ciphertext, int ciphertext_len, unsigned char *key,
             unsigned char *iv, unsigned char *plaintext)
 {
+    sscanf(arg, "max_devices=%u", &cfg->max_devs);
+
+
     EVP_CIPHER_CTX *ctx;
 
     int len;
@@ -143,3 +145,4 @@ int decrypt(unsigned char *ciphertext, int ciphertext_len, unsigned char *key,
 
     return plaintext_len;
 }
+*/

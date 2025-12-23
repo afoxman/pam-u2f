@@ -7,6 +7,8 @@
 
 #include <stdio.h>
 
+#include "defs.h"
+
 #define DEFAULT_DEBUG_FILE stderr
 
 typedef struct {
@@ -20,12 +22,6 @@ typedef struct {
 #else /* !DEBUG_PAM */
 #define log_msg(log, ...)  debug_printf(log, NULL, 0, NULL, __VA_ARGS__)
 #endif /* DEBUG_PAM */
-
-#ifdef __GNUC__
-#define ATTRIBUTE_FORMAT(f, s, a) __attribute__((format(f, s, a)))
-#else
-#define ATTRIBUTE_FORMAT(f, s, a)
-#endif
 
 FILE *debug_open(const char *);
 void debug_close(FILE *f);

@@ -10,6 +10,7 @@
 #include <security/pam_appl.h>
 
 #include "cfg.h"
+#include "defs.h"
 
 #define BUFSIZE 1024
 #define MAX_DEVS 24
@@ -49,7 +50,7 @@ int do_manual_authentication(const cfg_t *cfg, const device_t *devices,
                              const unsigned n_devs, pam_handle_t *pamh);
 char *converse(pam_handle_t *pamh, int echocode, const char *prompt);
 int random_bytes(void *, size_t);
-char *format(const char *, ...);
+char *format(const char *, ...) ATTRIBUTE_FORMAT(printf, 1, 2);
 int cose_type(const char *, int *);
 const char *cose_string(int);
 char *expand_variables(const char *, const char *);

@@ -568,10 +568,11 @@ int main(int argc, char *argv[]) {
   int pin_set;
   fido_opt_t up;
   fido_opt_t uv;
-  unsigned char hmac_salt[HMAC_SALT_SIZE];
-  unsigned char iv[AES_256_CBC_INIT_VECTOR_SIZE];
   char password[BUFSIZE];
-  char *ep = NULL;
+  ep_params_t ep_params;
+  unsigned char *ep = NULL;
+  size_t ep_len;
+  char *ep_serialized = NULL;
   size_t ndevs = 0;
   int devopts = 0;
   int r;
@@ -690,6 +691,9 @@ int main(int argc, char *argv[]) {
   if (args.password) {
     up = args.no_user_presence != 0 ? FIDO_OPT_TRUE : FIDO_OPT_OMIT;
 
+    if (!generate_ep_params(&log, &ep_params))
+      goto err;
+ 
     assert = prepare_assert(&log, fido_cred_rp_name(cred),
       fido_cred_id_ptr(cred), fido_cred_id_len(cred), up, uv);
     if (!assert)
@@ -702,12 +706,7 @@ int main(int argc, char *argv[]) {
       goto err;
     }
 
-    if (!random_bytes(hmac_salt, HMAC_SALT_SIZE)) {
-      log_msg(&log, "error: random_bytes(hmac_salt)\n");
-      goto err;
-    }
-
-    r = fido_assert_set_hmac_salt(assert, hmac_salt, HMAC_SALT_SIZE);
+    r = fido_assert_set_hmac_salt(assert, ep_params.hmac_salt, sizeof(ep_params.hmac_salt));
     if (r != FIDO_OK) {
       log_msg(&log, "error: fido_assert_set_hmac_salt: %s (%d)\n", fido_strerr(r), r);
       goto err;
@@ -739,26 +738,24 @@ int main(int argc, char *argv[]) {
       goto err;
     }
 
-    if (!random_bytes(iv, AES_256_CBC_INIT_VECTOR_SIZE)) {
-      log_msg(&log, "error: random_bytes(iv)\n");
-      goto err;
-    }
-
-    ep = encrypt_password(&log, hmac_salt, HMAC_SALT_SIZE,
-                          iv, AES_256_CBC_INIT_VECTOR_SIZE,
+    if (!encrypt_password(&log, &ep_params, 
                           fido_assert_hmac_secret_ptr(assert, 0),
                           fido_assert_hmac_secret_len(assert, 0),
-                          password);
-    if (!ep)
+                          password, &ep, &ep_len))
+      goto err;
+
+    ep_serialized = serialize_ep(&log, &ep_params, ep, ep_len);
+    if (!ep_serialized)
       goto err;
   }
 
-  if (print_authfile_line(&log, &args, cred, ep) != 0)
+  if (print_authfile_line(&log, &args, cred, ep_serialized) != 0)
     goto err;
 
   exit_code = EXIT_SUCCESS;
 
 err:
+  free(ep_serialized);
   free(ep);
   explicit_bzero(password, sizeof(password));
   explicit_bzero(pin, sizeof(pin));

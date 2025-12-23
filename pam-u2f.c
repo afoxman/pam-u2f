@@ -335,5 +335,5 @@ PAM_EXTERN int pam_sm_setcred(pam_handle_t *pamh, int flags, int argc,
 }
 
 #ifdef PAM_MODULE_ENTRY
-PAM_MODULE_ENTRY("pam_u2f");
+PAM_MODULE_ENTRY("pam_u2f")
 #endif

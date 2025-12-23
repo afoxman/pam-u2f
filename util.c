@@ -1196,7 +1196,9 @@ int do_authentication(const cfg_t *cfg, const device_t *devices,
   fido_dev_info_t *devlist = NULL;
   fido_dev_t **authlist = NULL;
   int cued = 0;
+
   int has_ep = 0;
+
   int r;
   int retval = PAM_AUTH_ERR;
   size_t ndevs = 0;
@@ -1287,6 +1289,9 @@ int do_authentication(const cfg_t *cfg, const device_t *devices,
             log_msg(log, "error: fido_assert_set_extensions(FIDO_EXT_HMAC_SECRET): %s (%d)\n", fido_strerr(r), r);
             goto out;
           }
+
+// TODO: parse encryptedPassword into ep_params_t
+// TOOD: set hmac salt in fido_assert_t
         }
 
         if (opts.pin == FIDO_OPT_TRUE) {
@@ -1320,11 +1325,13 @@ int do_authentication(const cfg_t *cfg, const device_t *devices,
           r = fido_assert_verify(assert, 0, pk.type, pk.ptr);
           if (r == FIDO_OK) {
             if (has_ep) {
-// TODO: decrypt password
+
+// TODO: decrypt password using ep_params_t (iv) and hmac secret from assertion
 //       pam_set_item(pamh, PAM_AUTHTOK, decrypted_password)
 //       on error, set retval = PAM_AUTHINFO_UNAVAIL or PAM_AUTHTOK_ERR
 
 // TODO: repeat this logic below in the "manual" authentication code 
+
             }
 
             retval = PAM_SUCCESS;
