@@ -21,8 +21,8 @@ static void test_nouserok(const char *username) {
 
   memset(&cfg, 0, sizeof(cfg_t));
   cfg.auth_file = "credentials/this_file_does_not_exist.cred";
-  cfg.debug = 1;
-  cfg.debug_file = stderr;
+  cfg.debug_log.enabled = 1;
+  cfg.debug_log.file = stderr;
   cfg.max_devs = 1;
   cfg.nouserok = 1;
 
@@ -47,8 +47,8 @@ static void test_ssh_credential(const char *username) {
 
   memset(&cfg, 0, sizeof(cfg_t));
   cfg.auth_file = "credentials/ssh_credential.cred";
-  cfg.debug = 1;
-  cfg.debug_file = stderr;
+  cfg.debug_log.enabled = 1;
+  cfg.debug_log.file = stderr;
   cfg.max_devs = 1;
   cfg.sshformat = 1;
 
@@ -79,8 +79,8 @@ static void test_old_credential(const char *username) {
   memset(&cfg, 0, sizeof(cfg_t));
   cfg.auth_file = "credentials/old_credential.cred";
   cfg.sshformat = 0;
-  cfg.debug = 1;
-  cfg.debug_file = stderr;
+  cfg.debug_log.enabled = 1;
+  cfg.debug_log.file = stderr;
   cfg.max_devs = 1;
   cfg.sshformat = 0;
 
@@ -109,8 +109,8 @@ static void test_limited_count(const char *username) {
   unsigned ndevs;
 
   memset(&cfg, 0, sizeof(cfg_t));
-  cfg.debug = 1;
-  cfg.debug_file = stderr;
+  cfg.debug_log.enabled = 1;
+  cfg.debug_log.file = stderr;
 
   /* authfile contains three credentials (eddsa, es256, eddsa) */
   cfg.auth_file = "credentials/new_limited_count.cred";
@@ -168,8 +168,8 @@ static void test_new_credentials(const char *username) {
   int rc;
 
   memset(&cfg, 0, sizeof(cfg_t));
-  cfg.debug = 1;
-  cfg.debug_file = stderr;
+  cfg.debug_log.enabled = 1;
+  cfg.debug_log.file = stderr;
   cfg.max_devs = 24;
 
   /* clang-format off */

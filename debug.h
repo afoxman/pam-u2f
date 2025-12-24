@@ -20,7 +20,7 @@ typedef struct {
 #if defined(DEBUG_PAM)
 #define log_msg(log, ...)  debug_printf(log, __FILE__, __LINE__, __func__, __VA_ARGS__)
 #else /* !DEBUG_PAM */
-#define log_msg(log, ...)  debug_printf(log, NULL, 0, NULL, __VA_ARGS__)
+#define log_msg(log, ...)  debug_printf(log, "", 0, "", __VA_ARGS__)
 #endif /* DEBUG_PAM */
 
 FILE *debug_open(const char *);

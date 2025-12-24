@@ -90,7 +90,7 @@ void debug_printf(const debug_log_t *log, const char *file, int line,
     return;
 
   va_start(ap, fmt);
-  if (log->simple || !file || !func) {
+  if (log->simple) {
     vfprintf(log->file, fmt, ap);
   } else {
     debug_vfprintf(log->file, file, line, func, fmt, ap);

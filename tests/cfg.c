@@ -105,7 +105,7 @@ static void config_flip_all(const struct conf_file *cf, const cfg_t *cfg) {
 
   config_different_bool(conf_out, "alwaysok", cfg->alwaysok);
   config_different_bool(conf_out, "cue", cfg->cue);
-  config_different_bool(conf_out, "debug", cfg->debug);
+  config_different_bool(conf_out, "debug", cfg->debug_log.enabled);
   config_different_bool(conf_out, "expand", cfg->expand);
   config_different_bool(conf_out, "interactive", cfg->interactive);
   config_different_bool(conf_out, "manual", cfg->manual);
@@ -128,7 +128,7 @@ static void config_flip_all(const struct conf_file *cf, const cfg_t *cfg) {
 
   fprintf(conf_out, "max_devices=%d\n", cfg->max_devs + 1);
 
-  if (cfg->debug_file)
+  if (cfg->debug_log.file)
     fprintf(conf_out, "debug_file=syslog\n");
   else
     fprintf(conf_out, "debug_file=stderr\n");
@@ -175,7 +175,7 @@ static void test_regular(void) {
   // 4. Assert that every field is different from the default.
   assert(cfg.max_devs != cfg_defaults.max_devs);
   assert(cfg.manual != cfg_defaults.manual);
-  assert(cfg.debug != cfg_defaults.debug);
+  assert(cfg.debug_log.enabled != cfg_defaults.debug_log.enabled);
   assert(cfg.nouserok != cfg_defaults.nouserok);
   assert(cfg.openasuser != cfg_defaults.openasuser);
   assert(cfg.alwaysok != cfg_defaults.alwaysok);
@@ -195,7 +195,7 @@ static void test_regular(void) {
   assert(str_opt_cmp(cfg.prompt, cfg_defaults.prompt));
   assert(str_opt_cmp(cfg.cue_prompt, cfg_defaults.cue_prompt));
 
-  assert(cfg.debug_file != cfg_defaults.debug_file);
+  assert(cfg.debug_log.file != cfg_defaults.debug_log.file);
 
   cfg_free(&cfg_defaults);
   cfg_free(&cfg);

@@ -16,14 +16,12 @@
 #include "debug.h"
 
 static void cfg_load_arg_debug(cfg_t *cfg, const char *arg) {
-#if defined(DEBUG_PAM)
   if (strcmp(arg, "debug") == 0) {
     cfg->debug_log.enabled = 1;
   } else if (strncmp(arg, "debug_file=", strlen("debug_file=")) == 0) {
     debug_close(cfg->debug_log.file);
     cfg->debug_log.file = debug_open(arg + strlen("debug_file="));
   }
-#endif /* DEBUG_PAM */  
 }
 
 static void cfg_load_arg(cfg_t *cfg, const char *arg) {
