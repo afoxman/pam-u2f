@@ -23,11 +23,17 @@ typedef struct ep_params ep_params_t;
 bool generate_ep_params(const debug_log_t *log, ep_params_t *ep_params);
 
 bool encrypt_password(const debug_log_t *log, const ep_params_t *ep_params,
-                      const unsigned char* hmac_secret, size_t hmac_secret_len,
+                      const unsigned char *hmac_secret, size_t hmac_secret_len,
                       const char *password,
                       unsigned char **ep, size_t *ep_len);
+bool decrypt_password(const debug_log_t *log, const ep_params_t *ep_params,
+                      const unsigned char *hmac_secret, size_t hmac_secret_len,
+                      const unsigned char *ep, size_t ep_len,
+                      char **password);
 
 char *serialize_ep(const debug_log_t *log, const ep_params_t *ep_params,
                    const unsigned char *ep, size_t ep_len);
+bool deserialize_ep(const debug_log_t *log, const char* ep_serialized,
+                    ep_params_t *ep_params, unsigned char** ep, size_t* ep_len);
 
 #endif /* CRYPT_H */

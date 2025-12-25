@@ -92,6 +92,52 @@ err:
   return result;
 }
 
+bool decrypt_password(const debug_log_t *log, const ep_params_t *ep_params,
+                      const unsigned char *hmac_secret, size_t hmac_secret_len,
+                      const unsigned char *ep, size_t ep_len,
+                      char **password) {
+  bool result = false;
+  size_t decrypted_size;
+  unsigned char *decrypted = NULL;
+  size_t decrypted_len = 0;
+  EVP_CIPHER_CTX *ctx = NULL;
+  int count;
+
+  if (hmac_secret_len != HMAC_SECRET_SIZE) {
+    log_msg(log, "error: invalid hmac_secret_len %zu, expected %d\n", hmac_secret_len, HMAC_SECRET_SIZE);
+    goto err;
+  }
+
+  decrypted_size = (((ep_len + 15) / 16) * 16) + 1;
+  CALL(decrypted = malloc(decrypted_size));
+
+  CALL_OSSL(ctx = EVP_CIPHER_CTX_new());
+  CALL_OSSL(EVP_DecryptInit_ex(ctx, EVP_aes_256_cbc(), NULL, hmac_secret, ep_params->iv));
+  CALL_OSSL(EVP_DecryptUpdate(ctx, decrypted, &count, ep, (int)ep_len));
+  decrypted_len += count;
+  CALLMSG(decrypted_len < decrypted_size, "decryption buffer overflow");
+
+  CALL_OSSL(EVP_DecryptFinal_ex(ctx, decrypted + decrypted_len, &count));
+  decrypted_len += count;
+  CALLMSG(decrypted_len < decrypted_size, "decryption buffer overflow");
+  decrypted[decrypted_len] = '\0';
+
+  *password = (char*)decrypted;
+  decrypted = NULL;
+  result = true;
+
+err:
+  if (decrypted != NULL) {
+    explicit_bzero(decrypted, decrypted_size);
+    free(decrypted);
+  }
+  if (ctx != NULL)
+    EVP_CIPHER_CTX_free(ctx);
+
+  return result;
+}
+
+
 char *serialize_ep(const debug_log_t *log, const ep_params_t *ep_params,
                    const unsigned char *ep, size_t ep_len) {
   char *b64_salt = NULL;
@@ -112,37 +158,186 @@ err:
   return formatted;
 }
 
-/*
-// https://wiki.openssl.org/index.php/EVP_Symmetric_Encryption_and_Decryption
-
-int decrypt(unsigned char *ciphertext, int ciphertext_len, unsigned char *key,
-            unsigned char *iv, unsigned char *plaintext)
-{
-    sscanf(arg, "max_devices=%u", &cfg->max_devs);
 
 
-    EVP_CIPHER_CTX *ctx;
 
-    int len;
+struct str {
+  const char *ptr;
+  size_t len;
+};
 
-    int plaintext_len;
+typedef struct str str_t;
 
-    if(!(ctx = EVP_CIPHER_CTX_new()))
-        handleErrors();
+#define STRFMT "%.*s"
+#define STRVA(s) (int)s.len, s.ptr
 
-    if(1 != EVP_DecryptInit_ex(ctx, EVP_aes_256_cbc(), NULL, key, iv))
-        handleErrors();
+#define STRINIT(s) { .ptr = s, .len = sizeof(s)-1 }
 
-    if(1 != EVP_DecryptUpdate(ctx, plaintext, &len, ciphertext, ciphertext_len))
-        handleErrors();
-    plaintext_len = len;
+str_t str_get(const char *);
+int str_compare(str_t, str_t);
+size_t str_split(str_t, const char, str_t *, size_t);
 
-    if(1 != EVP_DecryptFinal_ex(ctx, plaintext + len, &len))
-        handleErrors();
-    plaintext_len += len;
 
-    EVP_CIPHER_CTX_free(ctx);
 
-    return plaintext_len;
+// static const str_t str_empty = { .ptr = NULL, .len = 0 };
+
+str_t str_get(const char *p) {
+  str_t s = { .ptr = p, .len = strlen(p) };
+  return s;
 }
-*/
+
+int str_compare(str_t left, str_t right) {
+  if (left.len < right.len)
+    return -1;
+  if (left.len > right.len)
+    return 1;
+  return strncmp(left.ptr, right.ptr, left.len);
+}
+
+size_t str_split(str_t s, const char delimiter, str_t *tokens, size_t tokens_len) {
+  size_t token_count = 0;
+
+  const char *start = s.ptr;
+  const char *end = s.ptr + s.len;
+  const char *cur = start;
+  while (token_count < tokens_len && cur < end) {
+    if (delimiter == *cur) {
+      tokens[token_count].ptr = start;
+      tokens[token_count].len = cur - start;
+      token_count++;
+
+      start = cur + 1;
+    }
+  }
+
+  if (token_count < tokens_len && cur > start) {
+    tokens[token_count].ptr = start;
+    tokens[token_count].len = cur - start;
+    token_count++;
+  }
+
+  return token_count;
+}
+
+// str_t str_substr_len(str_t s, size_t offset, size_t length) {
+//   // Bound the substring using the input, carefully avoiding overflows.
+//   if (offset > s.len)
+//     offset = s.len;
+//   if (length > s.len - offset)
+//     length = s.len - offset;
+
+//   // Modify the input, turning it into the substring.
+//   s.ptr += offset;
+//   s.len = length;
+//   return s;
+// }
+
+// str_t str_substr(str_t s, size_t offset) {
+//   return str_substr_len(s, offset, SIZE_MAX);
+// }
+
+// str_t str_find_first(str_t s, char delimiter) {
+//   for (size_t i = 0; i < s.len; i++) {
+//     const char ch = s.ptr[i];
+//     if (ch == delimiter)
+//       return str_substr(s, i);
+//     if (ch == '\0')
+//       return str_empty;
+//   }
+//   return str_empty;
+// }
+
+
+
+
+
+#define EP_FIELD_COUNT 3
+
+bool parse_named_field(const debug_log_t *, str_t, str_t, str_t *);
+bool parse_named_field_base64(const debug_log_t *, str_t, str_t, unsigned char **, size_t *);
+bool parse_named_field_base64_copy(const debug_log_t *, str_t, str_t, unsigned char *, size_t);
+
+
+
+
+
+static const str_t str_ep_key_salt = STRINIT("salt");
+static const str_t str_ep_key_iv = STRINIT("iv");
+static const str_t str_ep_key_ep = STRINIT("ep");
+
+bool parse_named_field(const debug_log_t *log, str_t field, str_t name, str_t *value) {
+  str_t tokens[2];
+  size_t count;
+  
+  count = str_split(field, '=', tokens, 2);
+  if (count != 2) {
+    log_msg(log, "error: parse_named_field("STRFMT"): field is not in key=value form -- "STRFMT"\n", STRVA(name), STRVA(field));
+    return false;
+  }
+
+  if (0 != str_compare(name, tokens[0])) {
+    log_msg(log, "error: parse_named_field("STRFMT"): got unexpected key "STRFMT"\n", STRVA(name), STRVA(tokens[0]));
+    return false;
+  }
+
+  *value = tokens[1];
+  return true;
+}
+
+bool parse_named_field_base64(const debug_log_t *log, str_t field, str_t name, unsigned char **value, size_t *value_len) {
+  bool result = false;
+  str_t s;
+
+  CALL(parse_named_field(log, field, name, &s));
+  CALL_OSSL(b64_decode(s.ptr, s.len, (void **)value, value_len));
+  result = true;
+
+err:
+  return result;
+}
+
+bool parse_named_field_base64_copy(const debug_log_t *log, str_t field, str_t name, unsigned char *value, size_t value_len) {
+  bool result = false;
+  unsigned char *data = NULL;
+  size_t data_len;
+
+  CALL(parse_named_field_base64(log, field, name, &data, &data_len));
+  if (data_len != value_len) {
+    log_msg(log, "error: parse_named_field_base64_copy("STRFMT"): got %zu bytes, expected %zu bytes\n", STRVA(name), data_len, value_len);
+    goto err;
+  }
+  memcpy(value, data, value_len);
+  result = true;
+
+err:
+  free(data);
+  return result;
+}
+
+
+bool deserialize_ep(const debug_log_t *log, const char* ep_serialized,
+                    ep_params_t *ep_params, unsigned char** ep, size_t* ep_len) {
+  bool result = false;
+  size_t count;
+  str_t fields[EP_FIELD_COUNT];
+  unsigned char *ep_value = NULL;
+  size_t ep_value_len;
+
+  count = str_split(str_get(ep_serialized), '|', fields, EP_FIELD_COUNT);
+  if (count != EP_FIELD_COUNT) {
+    log_msg(log, "error: encrypted password is missing fields -- found %zu, expected %d\n", count, EP_FIELD_COUNT);
+    goto err;
+  }
+  CALL(parse_named_field_base64_copy(log, fields[0], str_ep_key_salt, ep_params->hmac_salt, sizeof(ep_params->hmac_salt)));
+  CALL(parse_named_field_base64_copy(log, fields[1], str_ep_key_iv, ep_params->iv, sizeof(ep_params->iv)));
+  CALL(parse_named_field_base64(log, fields[2], str_ep_key_ep, &ep_value, &ep_value_len));
+
+  *ep = ep_value;
+  ep_value = NULL;
+  *ep_len = ep_value_len;
+  result = true;
+
+err:
+  free(ep_value);
+  return result;
+}

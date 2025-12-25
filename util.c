@@ -23,6 +23,7 @@
 #include <arpa/inet.h>
 
 #include "b64.h"
+#include "crypt.h"
 #include "debug.h"
 #include "util.h"
 
@@ -576,7 +577,7 @@ static int parse_ssh_format(const cfg_t *cfg, FILE *opwfile,
   *n_devs = 0;
 
   if (!load_ssh_key(cfg, &b64, opwfile, opwfile_size) ||
-      !b64_decode(b64, (void **) &decoded_initial, &decoded_len)) {
+      !b64_decode(b64, strlen(b64), (void **) &decoded_initial, &decoded_len)) {
     log_msg(log, "Unable to decode credential");
     goto out;
   }
@@ -1064,7 +1065,7 @@ static fido_assert_t* prepare_assert_using_device(const cfg_t *cfg, const device
     log_msg(log, "Credential is resident\n");
   } else {
     log_msg(log, "Key handle: %s", device->keyHandle);
-    if (!b64_decode(device->keyHandle, (void **) &buf, &buf_len)) {
+    if (!b64_decode(device->keyHandle, strlen(device->keyHandle), (void **) &buf, &buf_len)) {
       log_msg(log, "Failed to decode key handle\n");
       goto err;
     }
@@ -1133,7 +1134,7 @@ static int parse_pk(const cfg_t *cfg, int old, const char *type, const char *pk,
       goto err;
     }
   } else {
-    if (!b64_decode(pk, (void **) &buf, &buf_len)) {
+    if (!b64_decode(pk, strlen(pk), (void **) &buf, &buf_len)) {
       log_msg(log, "Failed to decode public key");
       goto err;
     }
@@ -1196,9 +1197,9 @@ int do_authentication(const cfg_t *cfg, const device_t *devices,
   fido_dev_info_t *devlist = NULL;
   fido_dev_t **authlist = NULL;
   int cued = 0;
-
-  int has_ep = 0;
-
+  ep_params_t ep_params;
+  unsigned char *ep = NULL;
+  size_t ep_len;
   int r;
   int retval = PAM_AUTH_ERR;
   size_t ndevs = 0;
@@ -1284,14 +1285,21 @@ int do_authentication(const cfg_t *cfg, const device_t *devices,
         }
 
         if (strcmp(devices[i].encryptedPassword, "*") != 0) {
-          has_ep = 1;
+          free(ep);
+          ep = NULL;
+
+          if (!deserialize_ep(log, devices[i].encryptedPassword, &ep_params, &ep, &ep_len))
+            goto out;
+
           if ((r = fido_assert_set_extensions(assert, FIDO_EXT_HMAC_SECRET)) != FIDO_OK) {
             log_msg(log, "error: fido_assert_set_extensions(FIDO_EXT_HMAC_SECRET): %s (%d)\n", fido_strerr(r), r);
             goto out;
           }
 
-// TODO: parse encryptedPassword into ep_params_t
-// TOOD: set hmac salt in fido_assert_t
+          if ((r = fido_assert_set_hmac_salt(assert, ep_params.hmac_salt, sizeof(ep_params.hmac_salt))) != FIDO_OK) {
+            log_msg(log, "error: fido_assert_set_hmac_salt: %s (%d)\n", fido_strerr(r), r);
+            goto out;
+          }
         }
 
         if (opts.pin == FIDO_OPT_TRUE) {
@@ -1324,14 +1332,22 @@ int do_authentication(const cfg_t *cfg, const device_t *devices,
           }
           r = fido_assert_verify(assert, 0, pk.type, pk.ptr);
           if (r == FIDO_OK) {
-            if (has_ep) {
-
-// TODO: decrypt password using ep_params_t (iv) and hmac secret from assertion
-//       pam_set_item(pamh, PAM_AUTHTOK, decrypted_password)
-//       on error, set retval = PAM_AUTHINFO_UNAVAIL or PAM_AUTHTOK_ERR
-
-// TODO: repeat this logic below in the "manual" authentication code 
-
+            if (ep != NULL) {
+              char *password = NULL;
+              int retval_authtok = PAM_SUCCESS;
+              if (decrypt_password(log, &ep_params, 
+                                    fido_assert_hmac_secret_ptr(assert, 0),
+                                    fido_assert_hmac_secret_len(assert, 0),
+                                    ep, ep_len, &password)) {
+                retval_authtok = pam_set_item(pamh, PAM_AUTHTOK, password);
+                explicit_bzero(password, strlen(password));
+                free(password);
+              }
+              if (retval_authtok != PAM_SUCCESS) {
+                log_msg(log, "error: pam_set_item(PAM_AUTHTOK): %s (%d)", pam_strerror(pamh, r), r);
+                retval = retval_authtok;
+                goto out;
+              }
             }
 
             retval = PAM_SUCCESS;
@@ -1377,6 +1393,7 @@ int do_authentication(const cfg_t *cfg, const device_t *devices,
   }
 
 out:
+  free(ep);
   reset_pk(&pk);
   fido_assert_free(&assert);
   fido_dev_info_free(&devlist, ndevs);
@@ -1413,12 +1430,12 @@ static int manual_get_assert(const cfg_t *cfg, const char *prompt,
   b64_authdata = converse(pamh, PAM_PROMPT_ECHO_ON, prompt);
   b64_sig = converse(pamh, PAM_PROMPT_ECHO_ON, prompt);
 
-  if (!b64_decode(b64_authdata, (void **) &authdata, &authdata_len)) {
+  if (!b64_decode(b64_authdata, strlen(b64_authdata), (void **) &authdata, &authdata_len)) {
     log_msg(log, "Failed to decode authenticator data");
     goto err;
   }
 
-  if (!b64_decode(b64_sig, (void **) &sig, &sig_len)) {
+  if (!b64_decode(b64_sig, strlen(b64_sig), (void **) &sig, &sig_len)) {
     log_msg(log, "Failed to decode signature");
     goto err;
   }

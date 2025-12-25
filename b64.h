@@ -6,6 +6,6 @@
 #define B64_H
 
 int b64_encode(const void *, size_t, char **);
-int b64_decode(const char *, void **, size_t *);
+int b64_decode(const char *, size_t, void **, size_t *);
 
 #endif /* B64_H */
