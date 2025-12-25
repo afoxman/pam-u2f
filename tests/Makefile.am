@@ -22,6 +22,9 @@ check_PROGRAMS += cfg
 cfg_SOURCES = ./cfg.c ../cfg.c ../debug.c
 cfg_CFLAGS = -DPAM_U2F_TESTING -DSCONFDIR='"@SCONFDIR@"' $(AM_CFLAGS)
 
+check_PROGRAMS += test_log
+test_log_SOURCES = ./test_log.c ../log.c
+
 TESTS = $(check_PROGRAMS)
 
 EXTRA_DIST = CMakeLists.txt

@@ -158,6 +158,7 @@ set(PAM_U2F_SOURCES
 	debug.c
 	drop_privs.h
 	expand.c
+	log.c
 	util.c
 	explicit_bzero.c
 )
