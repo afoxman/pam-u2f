@@ -169,8 +169,8 @@ static void reset_device(device_t *device) {
   memset(device, 0, sizeof(*device));
 }
 
-static int parse_native_credential(const cfg_t *cfg, char *s, device_t *cred) {
-  const debug_log_t *log = &cfg->debug_log;
+static int parse_native_credential(const log_t *log, const cfg_t *cfg, 
+                                   char *s, device_t *cred) {
   const char *delim = ",";
   const char *kh, *pk, *type, *attr, *ep;
   char *saveptr = NULL;
@@ -178,23 +178,23 @@ static int parse_native_credential(const cfg_t *cfg, char *s, device_t *cred) {
   memset(cred, 0, sizeof(*cred));
 
   if ((kh = strtok_r(s, delim, &saveptr)) == NULL) {
-    log_msg(log, "Missing key handle");
+    log_error(log, "Missing key handle");
     goto fail;
   }
 
   if ((pk = strtok_r(NULL, delim, &saveptr)) == NULL) {
-    log_msg(log, "Missing public key");
+    log_error(log, "Missing public key");
     goto fail;
   }
 
   if ((type = strtok_r(NULL, delim, &saveptr)) == NULL) {
-    log_msg(log, "Old format, assume es256 and +presence");
+    log_error(log, "Old format, assume es256 and +presence");
     cred->old_format = 1;
     type = "es256";
     attr = "+presence";
     ep = "*";
   } else if ((attr = strtok_r(NULL, delim, &saveptr)) == NULL) {
-    log_msg(log, "Empty attributes");
+    log_error(log, "Empty attributes");
     attr = "";
     ep = "*";
   } else if ((ep = strtok_r(NULL, delim, &saveptr)) == NULL) {
@@ -206,7 +206,7 @@ static int parse_native_credential(const cfg_t *cfg, char *s, device_t *cred) {
       (cred->coseType = strdup(type)) == NULL ||
       (cred->attributes = strdup(attr)) == NULL ||
       (cred->encryptedPassword = strdup(ep)) == NULL) {
-    log_msg(log, "Unable to allocate memory for credential components");
+    log_error(log, "Unable to allocate memory for credential components");
     goto fail;
   }
 
@@ -217,11 +217,10 @@ fail:
   return 0;
 }
 
-static int parse_native_format(const cfg_t *cfg, const char *username,
-                               FILE *opwfile, device_t *devices,
-                               unsigned *n_devs) {
+static int parse_native_format(const log_t *log, const cfg_t *cfg, 
+                               const char *username, FILE *opwfile, 
+                               device_t *devices, unsigned *n_devs) {
 
-  const debug_log_t *log = &cfg->debug_log;
   const char *s_user;
   char *buf = NULL, *s_credential;
   size_t bufsiz = 0;
@@ -234,7 +233,7 @@ static int parse_native_format(const cfg_t *cfg, const char *username,
     if (len > 0 && buf[len - 1] == '\n')
       buf[len - 1] = '\0';
 
-    log_msg(log, "Read %zu bytes", len);
+    log_trace(log, "Read %zu bytes", len);
 
     s_user = strtok_r(buf, ":", &saveptr);
     if (s_user && strcmp(username, s_user) == 0) {
@@ -287,9 +286,8 @@ fail:
   return r;
 }
 
-static int load_ssh_key(const cfg_t *cfg, char **out, FILE *opwfile,
-                        size_t opwfile_size) {
-  const debug_log_t *log = &cfg->debug_log;
+static int load_ssh_key(const log_t *log, const cfg_t *cfg, 
+                        char **out, FILE *opwfile, size_t opwfile_size) {
   size_t buf_size;
   char *buf = NULL;
   char *cp = NULL;
@@ -414,9 +412,9 @@ static int ssh_get_cstring(const unsigned char **buf, size_t *size, char **str,
   return 1;
 }
 
-static int ssh_log_cstring(const cfg_t *cfg, const unsigned char **buf,
-                           size_t *size, const char *name) {
-  const debug_log_t *log = &cfg->debug_log;
+static int ssh_log_cstring(const log_t *log, const cfg_t *cfg, 
+                           const unsigned char **buf, size_t *size, 
+                           const char *name) {
   char *str = NULL;
   size_t len;
 
@@ -432,9 +430,9 @@ static int ssh_log_cstring(const cfg_t *cfg, const unsigned char **buf,
   return 1;
 }
 
-static int ssh_get_attrs(const cfg_t *cfg, const unsigned char **buf,
-                         size_t *size, char **attrs) {
-  const debug_log_t *log = &cfg->debug_log;
+static int ssh_get_attrs(const log_t *log, const cfg_t *cfg, 
+                         const unsigned char **buf, size_t *size, 
+                         char **attrs) {
   char tmp[32] = {0};
   uint8_t flags;
   int r;
@@ -462,9 +460,9 @@ static int ssh_get_attrs(const cfg_t *cfg, const unsigned char **buf,
   return 1;
 }
 
-static int ssh_get_pubkey(const cfg_t *cfg, const unsigned char **buf,
-                          size_t *size, char **type_p, char **pubkey_p) {
-  const debug_log_t *log = &cfg->debug_log;
+static int ssh_get_pubkey(const log_t *log, const cfg_t *cfg, 
+                          const unsigned char **buf, size_t *size, 
+                          char **type_p, char **pubkey_p) {
   char *ssh_type = NULL;
   char *ssh_curve = NULL;
   const unsigned char *blob;
@@ -558,10 +556,9 @@ err:
   return ok;
 }
 
-static int parse_ssh_format(const cfg_t *cfg, FILE *opwfile,
-                            size_t opwfile_size, device_t *devices,
-                            unsigned *n_devs) {
-  const debug_log_t *log = &cfg->debug_log;
+static int parse_ssh_format(const log_t *log, const cfg_t *cfg, 
+                            FILE *opwfile, size_t opwfile_size, 
+                            device_t *devices, unsigned *n_devs) {
   char *b64 = NULL;
   const unsigned char *decoded;
   unsigned char *decoded_initial = NULL;
@@ -693,10 +690,10 @@ out:
   return r;
 }
 
-int get_devices_from_authfile(const cfg_t *cfg, const char *username,
-                              device_t *devices, unsigned *n_devs) {
+int get_devices_from_authfile(const log_t *log, const cfg_t *cfg, 
+                              const char *username, device_t *devices, 
+                              unsigned *n_devs) {
 
-  const debug_log_t *log = &cfg->debug_log;
   int r = PAM_AUTHINFO_UNAVAIL;
   int fd = -1;
   struct stat st;
@@ -826,10 +823,10 @@ void free_devices(device_t *devices, const unsigned n_devs) {
   free(devices);
 }
 
-static int get_authenticators(const cfg_t *cfg, const fido_dev_info_t *devlist,
-                              size_t devlist_len, fido_assert_t *assert,
-                              const int rk, fido_dev_t **authlist) {
-  const debug_log_t *log = &cfg->debug_log;
+static int get_authenticators(const log_t *log, const cfg_t *cfg, 
+                              const fido_dev_info_t *devlist, size_t devlist_len,
+                              fido_assert_t *assert, const int rk,
+                              fido_dev_t **authlist) {
   const fido_dev_info_t *di = NULL;
   fido_dev_t *dev = NULL;
   int r;
@@ -973,7 +970,7 @@ static int match_device_opts(fido_dev_t *dev, struct opts *opts) {
   return 1;
 }
 
-static int set_opts(const debug_log_t *log, fido_opt_t up, fido_opt_t uv,
+static int set_opts(const log_t *log, fido_opt_t up, fido_opt_t uv,
                     fido_assert_t *assert) {
   if (fido_assert_set_up(assert, up) != FIDO_OK) {
     log_msg(log, "Failed to set UP");
@@ -987,7 +984,7 @@ static int set_opts(const debug_log_t *log, fido_opt_t up, fido_opt_t uv,
   return 1;
 }
 
-static int set_cdh(const debug_log_t *log, fido_assert_t *assert) {
+static int set_cdh(const log_t *log, fido_assert_t *assert) {
   unsigned char cdh[32];
   int r;
 
@@ -1005,7 +1002,7 @@ static int set_cdh(const debug_log_t *log, fido_assert_t *assert) {
   return 1;
 }
 
-fido_assert_t *prepare_assert(const debug_log_t *log, const char* rp,
+fido_assert_t *prepare_assert(const log_t *log, const char* rp,
                               const unsigned char* kh, size_t kh_len,
                               fido_opt_t up, fido_opt_t uv) {
   fido_assert_t *assert = NULL;
@@ -1050,10 +1047,8 @@ err:
   return assert;
 }
 
-static fido_assert_t* prepare_assert_using_device(const cfg_t *cfg, const device_t *device,
-                                                  const struct opts *opts)
-{
-  const debug_log_t *log = &cfg->debug_log;
+static fido_assert_t* prepare_assert_using_device(const log_t *log, 
+    const cfg_t *cfg, const device_t *device, const struct opts *opts) {
   fido_assert_t *assert = NULL;
   const char* rp;
   unsigned char *buf = NULL;
@@ -1118,9 +1113,8 @@ const char *cose_string(int type) {
   }
 }
 
-static int parse_pk(const cfg_t *cfg, int old, const char *type, const char *pk,
-                    struct pk *out) {
-  const debug_log_t *log = &cfg->debug_log;
+static int parse_pk(const log_t *log, const cfg_t *cfg, int old, 
+                    const char *type, const char *pk, struct pk *out) {
   unsigned char *buf = NULL;
   size_t buf_len;
   int ok = 0;
@@ -1190,9 +1184,9 @@ err:
   return ok;
 }
 
-int do_authentication(const cfg_t *cfg, const device_t *devices,
-                      const unsigned n_devs, pam_handle_t *pamh) {
-  const debug_log_t *log = &cfg->debug_log;
+int do_authentication(const log_t *log, const cfg_t *cfg, 
+                      const device_t *devices, const unsigned n_devs, 
+                      pam_handle_t *pamh) {
   fido_assert_t *assert = NULL;
   fido_dev_info_t *devlist = NULL;
   fido_dev_t **authlist = NULL;
@@ -1411,9 +1405,9 @@ out:
 
 #define MAX_PROMPT_LEN (1024)
 
-static int manual_get_assert(const cfg_t *cfg, const char *prompt,
-                             pam_handle_t *pamh, fido_assert_t *assert) {
-  const debug_log_t *log = &cfg->debug_log;
+static int manual_get_assert(const log_t *log, const cfg_t *cfg, 
+                             const char *prompt, pam_handle_t *pamh, 
+                             fido_assert_t *assert) {
   char *b64_cdh = NULL;
   char *b64_rpid = NULL;
   char *b64_authdata = NULL;
@@ -1470,9 +1464,9 @@ err:
   return ok;
 }
 
-int do_manual_authentication(const cfg_t *cfg, const device_t *devices,
-                             const unsigned n_devs, pam_handle_t *pamh) {
-  const debug_log_t *log = &cfg->debug_log;
+int do_manual_authentication(const log_t *log, const cfg_t *cfg, 
+                             const device_t *devices, const unsigned n_devs, 
+                             pam_handle_t *pamh) {
   fido_assert_t *assert[n_devs];
   struct pk pk[n_devs];
   char *b64_challenge = NULL;

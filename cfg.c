@@ -13,15 +13,12 @@
 #include <security/pam_modules.h>
 
 #include "cfg.h"
-#include "debug.h"
 
 static void cfg_load_arg_debug(cfg_t *cfg, const char *arg) {
-  if (strcmp(arg, "debug") == 0) {
-    cfg->debug_log.enabled = 1;
-  } else if (strncmp(arg, "debug_file=", strlen("debug_file=")) == 0) {
-    debug_close(cfg->debug_log.file);
-    cfg->debug_log.file = debug_open(arg + strlen("debug_file="));
-  }
+  if (strcmp(arg, "debug") == 0)
+    cfg->debug = 1;
+  else if (strncmp(arg, "debug_file=", strlen("debug_file=")) == 0)
+    cfg->debug_file = arg + strlen("debug_file=");
 }
 
 static void cfg_load_arg(cfg_t *cfg, const char *arg) {
@@ -239,14 +236,12 @@ exit:
 
 static void cfg_reset(cfg_t *cfg) {
   memset(cfg, 0, sizeof(cfg_t));
-  cfg->debug_log.file = DEFAULT_DEBUG_FILE;
   cfg->userpresence = -1;
   cfg->userverification = -1;
   cfg->pinverification = -1;
 }
 
 int cfg_init(cfg_t *cfg, int flags, int argc, const char **argv) {
-  const debug_log_t *log = &cfg->debug_log;
   int i, r;
   const char *config_path = NULL;
 
@@ -269,34 +264,6 @@ int cfg_init(cfg_t *cfg, int flags, int argc, const char **argv) {
     cfg_load_arg(cfg, argv[i]);
 
 exit:
-  if (log->enabled) {
-    log_msg(log, "called.");
-    log_msg(log, "flags %d argc %d", flags, argc);
-    for (i = 0; i < argc; i++) {
-      log_msg(log, "argv[%d]=%s", i, argv[i]);
-    }
-    log_msg(log, "max_devices=%d", cfg->max_devs);
-    log_msg(log, "debug=%d", cfg->debug_log.enabled);
-    log_msg(log, "interactive=%d", cfg->interactive);
-    log_msg(log, "cue=%d", cfg->cue);
-    log_msg(log, "nodetect=%d", cfg->nodetect);
-    log_msg(log, "userpresence=%d", cfg->userpresence);
-    log_msg(log, "userverification=%d", cfg->userverification);
-    log_msg(log, "pinverification=%d", cfg->pinverification);
-    log_msg(log, "manual=%d", cfg->manual);
-    log_msg(log, "nouserok=%d", cfg->nouserok);
-    log_msg(log, "openasuser=%d", cfg->openasuser);
-    log_msg(log, "alwaysok=%d", cfg->alwaysok);
-    log_msg(log, "sshformat=%d", cfg->sshformat);
-    log_msg(log, "expand=%d", cfg->expand);
-    log_msg(log, "authfile=%s", cfg->auth_file ? cfg->auth_file : "(null)");
-    log_msg(log, "authpending_file=%s",
-            cfg->authpending_file ? cfg->authpending_file : "(null)");
-    log_msg(log, "origin=%s", cfg->origin ? cfg->origin : "(null)");
-    log_msg(log, "appid=%s", cfg->appid ? cfg->appid : "(null)");
-    log_msg(log, "prompt=%s", cfg->prompt ? cfg->prompt : "(null)");
-  }
-
   if (r != PAM_SUCCESS)
     cfg_free(cfg);
 
@@ -304,7 +271,32 @@ exit:
 }
 
 void cfg_free(cfg_t *cfg) {
-  debug_close(cfg->debug_log.file);
   free(cfg->defaults_buffer);
   cfg_reset(cfg);
+}
+
+void cfg_log(const log_t *log, const cfg_t *cfg) {
+  log_trace(log, "called.");
+  log_trace(log, "max_devices=%d", cfg->max_devs);
+  log_trace(log, "debug=%d", cfg->debug);
+  log_trace(log, "interactive=%d", cfg->interactive);
+  log_trace(log, "cue=%d", cfg->cue);
+  log_trace(log, "nodetect=%d", cfg->nodetect);
+  log_trace(log, "userpresence=%d", cfg->userpresence);
+  log_trace(log, "userverification=%d", cfg->userverification);
+  log_trace(log, "pinverification=%d", cfg->pinverification);
+  log_trace(log, "manual=%d", cfg->manual);
+  log_trace(log, "nouserok=%d", cfg->nouserok);
+  log_trace(log, "openasuser=%d", cfg->openasuser);
+  log_trace(log, "alwaysok=%d", cfg->alwaysok);
+  log_trace(log, "sshformat=%d", cfg->sshformat);
+  log_trace(log, "expand=%d", cfg->expand);
+  log_trace(log, "authfile=%s", cfg->auth_file ? cfg->auth_file : "(null)");
+  log_trace(log, "authpending_file=%s",
+            cfg->authpending_file ? cfg->authpending_file : "(null)");
+  log_trace(log, "origin=%s", cfg->origin ? cfg->origin : "(null)");
+  log_trace(log, "appid=%s", cfg->appid ? cfg->appid : "(null)");
+  log_trace(log, "prompt=%s", cfg->prompt ? cfg->prompt : "(null)");
+  log_trace(log, "cue_prompt=%s", cfg->cue_prompt ? cfg->cue_prompt : "(null)");
+  log_trace(log, "debug_file=%s", cfg->debug_file ? cfg->debug_file : "(null)");
 }

@@ -31,14 +31,14 @@ void log_message(
     ATTRIBUTE_FORMAT(printf, 6, 7);
 
 #if defined(DEBUG_PAM)
-#define __log_message(log, level, format, ...) log_message(log, __FILE__, __LINE__, __func__, level, format, __VA_ARGS__)
+#define __log_message(log, level, format, ...) log_message(log, __FILE__, __LINE__, __func__, level, format, ##__VA_ARGS__)
 #else /* !DEBUG_PAM */
-#define __log_message(log, level, format, ...) log_message(log, NULL, 0, NULL, level, format, __VA_ARGS__)
+#define __log_message(log, level, format, ...) log_message(log, NULL, 0, NULL, level, format, ##__VA_ARGS__)
 #endif /* DEBUG_PAM */
 
-#define log_error(log, format, ...)  __log_message(log, log_level_error, format, __VA_ARGS__)
-#define log_warn(log, format, ...)   __log_message(log, log_level_warn, format, __VA_ARGS__)
-#define log_info(log, format, ...)   __log_message(log, log_level_info, format, __VA_ARGS__)
-#define log_trace(log, format, ...)  __log_message(log, log_level_trace, format, __VA_ARGS__)
+#define log_error(log, format, ...)  __log_message(log, log_level_error, format, ##__VA_ARGS__)
+#define log_warn(log, format, ...)   __log_message(log, log_level_warn, format, ##__VA_ARGS__)
+#define log_info(log, format, ...)   __log_message(log, log_level_info, format, ##__VA_ARGS__)
+#define log_trace(log, format, ...)  __log_message(log, log_level_trace, format, ##__VA_ARGS__)
 
 #endif // LOG_H

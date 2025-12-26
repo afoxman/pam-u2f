@@ -16,7 +16,7 @@
 #define CALLMSG(f,m) \
   do { \
     if (!(f)) { \
-      log_msg(log, "error: %s: %s (%d)\n", (m), strerror(errno), errno); \
+      log_error(log, "%s: %s (%d)", (m), strerror(errno), errno); \
       goto err; \
     } \
   } while (0)
@@ -31,16 +31,16 @@
     } \
   } while (0)
 
-static void log_ossl_error(const debug_log_t *log, const char *api) {
+static void log_ossl_error(const log_t *log, const char *api) {
   unsigned long error;
   char error_string[512];
 
   error = ERR_get_error();
   ERR_error_string_n(error, error_string, sizeof(error_string));
-  log_msg(log, "error: %s: %s (%lu)\n", api, error_string, error);
+  log_error(log, "%s: %s (%lu)", api, error_string, error);
 }
 
-bool generate_ep_params(const debug_log_t *log, ep_params_t *ep_params) {
+bool generate_ep_params(const log_t *log, ep_params_t *ep_params) {
   bool result = false;
   CALL_OSSL(RAND_bytes(ep_params->hmac_salt, sizeof(ep_params->hmac_salt)));
   CALL_OSSL(RAND_bytes(ep_params->iv, sizeof(ep_params->iv)));
@@ -49,7 +49,7 @@ err:
   return result;
 }
 
-bool encrypt_password(const debug_log_t *log, const ep_params_t *ep_params,
+bool encrypt_password(const log_t *log, const ep_params_t *ep_params,
                       const unsigned char* hmac_secret, size_t hmac_secret_len,
                       const char *password, unsigned char **ep, size_t *ep_len) {
   bool result = false;
@@ -61,7 +61,7 @@ bool encrypt_password(const debug_log_t *log, const ep_params_t *ep_params,
   int count;
 
   if (hmac_secret_len != HMAC_SECRET_SIZE) {
-    log_msg(log, "error: invalid hmac_secret_len %zu, expected %d\n", hmac_secret_len, HMAC_SECRET_SIZE);
+    log_error(log, "invalid hmac_secret_len %zu, expected %d", hmac_secret_len, HMAC_SECRET_SIZE);
     goto err;
   }
   password_len = (int)strlen(password);
@@ -92,7 +92,7 @@ err:
   return result;
 }
 
-bool decrypt_password(const debug_log_t *log, const ep_params_t *ep_params,
+bool decrypt_password(const log_t *log, const ep_params_t *ep_params,
                       const unsigned char *hmac_secret, size_t hmac_secret_len,
                       const unsigned char *ep, size_t ep_len,
                       char **password) {
@@ -104,7 +104,7 @@ bool decrypt_password(const debug_log_t *log, const ep_params_t *ep_params,
   int count;
 
   if (hmac_secret_len != HMAC_SECRET_SIZE) {
-    log_msg(log, "error: invalid hmac_secret_len %zu, expected %d\n", hmac_secret_len, HMAC_SECRET_SIZE);
+    log_error(log, "invalid hmac_secret_len %zu, expected %d", hmac_secret_len, HMAC_SECRET_SIZE);
     goto err;
   }
 
@@ -138,7 +138,7 @@ err:
 }
 
 
-char *serialize_ep(const debug_log_t *log, const ep_params_t *ep_params,
+char *serialize_ep(const log_t *log, const ep_params_t *ep_params,
                    const unsigned char *ep, size_t ep_len) {
   char *b64_salt = NULL;
   char *b64_iv = NULL;
@@ -253,9 +253,9 @@ size_t str_split(str_t s, const char delimiter, str_t *tokens, size_t tokens_len
 
 #define EP_FIELD_COUNT 3
 
-bool parse_named_field(const debug_log_t *, str_t, str_t, str_t *);
-bool parse_named_field_base64(const debug_log_t *, str_t, str_t, unsigned char **, size_t *);
-bool parse_named_field_base64_copy(const debug_log_t *, str_t, str_t, unsigned char *, size_t);
+bool parse_named_field(const log_t *, str_t, str_t, str_t *);
+bool parse_named_field_base64(const log_t *, str_t, str_t, unsigned char **, size_t *);
+bool parse_named_field_base64_copy(const log_t *, str_t, str_t, unsigned char *, size_t);
 
 
 
@@ -265,18 +265,18 @@ static const str_t str_ep_key_salt = STRINIT("salt");
 static const str_t str_ep_key_iv = STRINIT("iv");
 static const str_t str_ep_key_ep = STRINIT("ep");
 
-bool parse_named_field(const debug_log_t *log, str_t field, str_t name, str_t *value) {
+bool parse_named_field(const log_t *log, str_t field, str_t name, str_t *value) {
   str_t tokens[2];
   size_t count;
   
   count = str_split(field, '=', tokens, 2);
   if (count != 2) {
-    log_msg(log, "error: parse_named_field("STRFMT"): field is not in key=value form -- "STRFMT"\n", STRVA(name), STRVA(field));
+    log_error(log, "parse_named_field("STRFMT"): field is not in key=value form -- "STRFMT, STRVA(name), STRVA(field));
     return false;
   }
 
   if (0 != str_compare(name, tokens[0])) {
-    log_msg(log, "error: parse_named_field("STRFMT"): got unexpected key "STRFMT"\n", STRVA(name), STRVA(tokens[0]));
+    log_error(log, "parse_named_field("STRFMT"): got unexpected key "STRFMT, STRVA(name), STRVA(tokens[0]));
     return false;
   }
 
@@ -284,7 +284,7 @@ bool parse_named_field(const debug_log_t *log, str_t field, str_t name, str_t *v
   return true;
 }
 
-bool parse_named_field_base64(const debug_log_t *log, str_t field, str_t name, unsigned char **value, size_t *value_len) {
+bool parse_named_field_base64(const log_t *log, str_t field, str_t name, unsigned char **value, size_t *value_len) {
   bool result = false;
   str_t s;
 
@@ -296,14 +296,14 @@ err:
   return result;
 }
 
-bool parse_named_field_base64_copy(const debug_log_t *log, str_t field, str_t name, unsigned char *value, size_t value_len) {
+bool parse_named_field_base64_copy(const log_t *log, str_t field, str_t name, unsigned char *value, size_t value_len) {
   bool result = false;
   unsigned char *data = NULL;
   size_t data_len;
 
   CALL(parse_named_field_base64(log, field, name, &data, &data_len));
   if (data_len != value_len) {
-    log_msg(log, "error: parse_named_field_base64_copy("STRFMT"): got %zu bytes, expected %zu bytes\n", STRVA(name), data_len, value_len);
+    log_error(log, "parse_named_field_base64_copy("STRFMT"): got %zu bytes, expected %zu bytes", STRVA(name), data_len, value_len);
     goto err;
   }
   memcpy(value, data, value_len);
@@ -315,7 +315,7 @@ err:
 }
 
 
-bool deserialize_ep(const debug_log_t *log, const char* ep_serialized,
+bool deserialize_ep(const log_t *log, const char* ep_serialized,
                     ep_params_t *ep_params, unsigned char** ep, size_t* ep_len) {
   bool result = false;
   size_t count;
@@ -325,7 +325,7 @@ bool deserialize_ep(const debug_log_t *log, const char* ep_serialized,
 
   count = str_split(str_get(ep_serialized), '|', fields, EP_FIELD_COUNT);
   if (count != EP_FIELD_COUNT) {
-    log_msg(log, "error: encrypted password is missing fields -- found %zu, expected %d\n", count, EP_FIELD_COUNT);
+    log_error(log, "encrypted password is missing fields -- found %zu, expected %d", count, EP_FIELD_COUNT);
     goto err;
   }
   CALL(parse_named_field_base64_copy(log, fields[0], str_ep_key_salt, ep_params->hmac_salt, sizeof(ep_params->hmac_salt)));

@@ -36,18 +36,21 @@ typedef struct {
   int old_format;
 } device_t;
 
-int get_devices_from_authfile(const cfg_t *cfg, const char *username,
+int get_devices_from_authfile(const log_t *log, const cfg_t *cfg, 
+                              const char *username,
                               device_t *devices, unsigned *n_devs);
 void free_devices(device_t *devices, const unsigned n_devs);
 
-fido_assert_t *prepare_assert(const debug_log_t *log, const char* rp,
+fido_assert_t *prepare_assert(const log_t *log, const char* rp,
                               const unsigned char* kh, size_t kh_len,
                               fido_opt_t up, fido_opt_t uv);
 
-int do_authentication(const cfg_t *cfg, const device_t *devices,
-                      const unsigned n_devs, pam_handle_t *pamh);
-int do_manual_authentication(const cfg_t *cfg, const device_t *devices,
-                             const unsigned n_devs, pam_handle_t *pamh);
+int do_authentication(const log_t *log, const cfg_t *cfg, 
+                      const device_t *devices, const unsigned n_devs, 
+                      pam_handle_t *pamh);
+int do_manual_authentication(const log_t *log, const cfg_t *cfg, 
+                             const device_t *devices, const unsigned n_devs, 
+                             pam_handle_t *pamh);
 char *converse(pam_handle_t *pamh, int echocode, const char *prompt);
 int random_bytes(void *, size_t);
 char *format(const char *, ...) ATTRIBUTE_FORMAT(printf, 1, 2);
