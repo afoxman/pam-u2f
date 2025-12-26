@@ -11,11 +11,6 @@
 
 #define LOG_MESSAGE_MAX 2000
 
-typedef enum log_output_type {
-  log_output_type_file,
-  log_output_type_syslog
-} log_output_type_t;
-
 struct log {
   log_output_type_t output_type;
   FILE *file;
@@ -115,6 +110,18 @@ log_t *log_create_using_syslog(log_level_t minimum_level, const char *prefix, in
 
 void log_destroy(log_t **plog) {
   log_free(plog);
+}
+
+log_output_type_t log_get_output_type(const log_t *log) {
+  if (!log)
+    return log_output_type_none;
+  return log->output_type;
+}
+
+log_level_t log_get_minimum_level(const log_t *log) {
+  if (!log)
+    return log_level_none;
+  return log->minimum_level;
 }
 
 ATTRIBUTE_FORMAT(printf, 3, 0)

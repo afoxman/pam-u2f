@@ -10,11 +10,18 @@
 
 #include "defs.h"
 
+typedef enum log_output_type {
+  log_output_type_none,
+  log_output_type_file,
+  log_output_type_syslog
+} log_output_type_t;
+
 typedef enum log_level {
-  log_level_trace = 0,
-  log_level_info = 1,
-  log_level_warn = 2,
-  log_level_error = 3
+  log_level_none,
+  log_level_trace,
+  log_level_info,
+  log_level_warn,
+  log_level_error
 } log_level_t;
 
 typedef struct log log_t;
@@ -22,6 +29,9 @@ typedef struct log log_t;
 log_t *log_create_using_file(log_level_t minimum_level, const char *prefix, FILE *file);
 log_t *log_create_using_syslog(log_level_t minimum_level, const char *prefix, int facility);
 void log_destroy(log_t **plog);
+
+log_output_type_t log_get_output_type(const log_t *log);
+log_level_t log_get_minimum_level(const log_t *log);
 
 void log_message(
     const log_t *log,
