@@ -147,11 +147,12 @@ static fido_cred_t *prepare_cred(const log_t *log,
 
   log_trace(log, "Setting user to %s", user);
 
-// TODO: Use an inline formatter or some other trick to get the hex data into a single log call
-
-  log_trace(log, "Setting user id to ");
-  for (size_t i = 0; i < sizeof(userid); i++)
-    log_trace(log, "%02x", userid[i]);
+  if (log_get_minimum_level(log) <= log_level_trace) {
+    char userid_str[sizeof(userid) * 2 + 1];
+    for (size_t i = 0; i < sizeof(userid); i++)
+      sprintf(userid_str + (i*2), "%02x", userid[i]);
+    log_trace(log, "Setting user id to %s", userid_str);
+  }
 
   if ((r = fido_cred_set_user(cred, userid, sizeof(userid), user, user,
                               NULL)) != FIDO_OK) {
@@ -589,9 +590,6 @@ int main(int argc, char *argv[]) {
 
   if (ndevs == 0) {
     for (int i = 0; i < TIMEOUT; i += FREQUENCY) {
-
-// TODO: REVIEW: this was printf -- now going through log; make sure it looks ok
-
       log_info(log, 
               "No FIDO authenticator available, please insert one now, you "
               "have %2d seconds",
@@ -607,9 +605,6 @@ int main(int argc, char *argv[]) {
       }
 
       if (ndevs != 0) {
-
-// TODO: REVIEW: this was printf -- now going through log; make sure it looks ok
-
         log_info(log, "FIDO authenticator found!");
         break;
       }
@@ -617,9 +612,6 @@ int main(int argc, char *argv[]) {
   }
 
   if (ndevs == 0) {
-
-// TODO: REVIEW: this was printf -- now going through log; make sure it looks ok
-
     log_error(log, "No FIDO authenticator found. Aborting.");
     goto err;
   }
