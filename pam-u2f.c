@@ -20,8 +20,8 @@
 #include <string.h>
 #include <errno.h>
 
-#include "debug.h"
 #include "drop_privs.h"
+#include "log.h"
 #include "util.h"
 
 #define free_const(a) free((void *) (uintptr_t) (a))
@@ -83,7 +83,7 @@ static char *resolve_authfile_path(const log_t *log, const cfg_t *cfg,
   return authfile;
 }
 
-FILE *open_log_file(const char *filename) {
+static FILE *open_log_file(const char *filename) {
   struct stat st;
   FILE *file;
   int fd;
@@ -116,7 +116,7 @@ err:
   return stderr; /* fallback to default */
 }
 
-void close_log_file(FILE *f) {
+static void close_log_file(FILE *f) {
   if (f != NULL && f != stdout && f != stderr)
     fclose(f);
 }
@@ -131,7 +131,7 @@ int pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc,
   cfg_t *cfg = &cfg_st;
   FILE *log_file = NULL;
   log_level_t minimum_level;
-  const log_t *log = NULL;
+  log_t *log = NULL;
   char buffer[BUFSIZE];
   int pgu_ret, gpn_ret;
   int retval = PAM_ABORT;
@@ -271,7 +271,7 @@ int pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc,
     }
     log_trace(log, "Switched to uid %i", pw->pw_uid);
   }
-  retval = get_devices_from_authfile(cfg, user, devices, &n_devices);
+  retval = get_devices_from_authfile(log, cfg, user, devices, &n_devices);
 
   if (openasuser) {
     if (pam_modutil_regain_priv(pamh, &privs)) {
@@ -328,9 +328,9 @@ int pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc,
     if (cfg->interactive) {
       interactive_prompt(pamh, cfg);
     }
-    retval = do_authentication(cfg, devices, n_devices, pamh);
+    retval = do_authentication(log, cfg, devices, n_devices, pamh);
   } else {
-    retval = do_manual_authentication(cfg, devices, n_devices, pamh);
+    retval = do_manual_authentication(log, cfg, devices, n_devices, pamh);
   }
 
   // Close the authpending_file to indicate that we stop waiting for a touch

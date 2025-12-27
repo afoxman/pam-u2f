@@ -26,29 +26,45 @@ typedef enum log_level {
 
 typedef struct log log_t;
 
-log_t *log_create_using_file(log_level_t minimum_level, const char *prefix, FILE *file);
-log_t *log_create_using_syslog(log_level_t minimum_level, const char *prefix, int facility);
+log_t *log_create_using_file(
+  log_level_t minimum_level, const char *prefix, FILE *file);
+log_t *log_create_using_syslog(
+  log_level_t minimum_level, const char *prefix, int facility);
+
 void log_destroy(log_t **plog);
 
 log_output_type_t log_get_output_type(const log_t *log);
 log_level_t log_get_minimum_level(const log_t *log);
 
 void log_message(
-    const log_t *log,
-    const char *filename, int line, const char *function, 
-    log_level_t level,
-    const char *format, ...) 
-    ATTRIBUTE_FORMAT(printf, 6, 7);
+  const log_t *log, log_level_t level, 
+  const char *format, ...)
+  ATTRIBUTE_FORMAT(printf, 3, 4);
 
-#if defined(DEBUG_PAM)
-#define __log_message(log, level, format, ...) log_message(log, __FILE__, __LINE__, __func__, level, format, ##__VA_ARGS__)
-#else /* !DEBUG_PAM */
-#define __log_message(log, level, format, ...) log_message(log, NULL, 0, NULL, level, format, ##__VA_ARGS__)
-#endif /* DEBUG_PAM */
+void log_message_with_context(
+  const log_t *log, log_level_t level, 
+  const char *filename, int line, const char *function, 
+  const char *format, ...)
+  ATTRIBUTE_FORMAT(printf, 6, 7);
 
-#define log_error(log, format, ...)  __log_message(log, log_level_error, format, ##__VA_ARGS__)
-#define log_warn(log, format, ...)   __log_message(log, log_level_warn, format, ##__VA_ARGS__)
-#define log_info(log, format, ...)   __log_message(log, log_level_info, format, ##__VA_ARGS__)
-#define log_trace(log, format, ...)  __log_message(log, log_level_trace, format, ##__VA_ARGS__)
+#ifdef LOG_INCLUDE_CONTEXT
+
+#define log_trace(log, ...) log_message_with_context(log, log_level_trace, \
+  __FILE__, __LINE__, __func__, __VA_ARGS__)
+#define log_info(log, ...)  log_message_with_context(log, log_level_info, \
+  __FILE__, __LINE__, __func__, __VA_ARGS__)
+#define log_warn(log, ...)  log_message_with_context(log, log_level_warn, \
+  __FILE__, __LINE__, __func__, __VA_ARGS__)
+#define log_error(log, ...) log_message_with_context(log, log_level_error, \
+  __FILE__, __LINE__, __func__, __VA_ARGS__)
+
+#else // !LOG_INCLUDE_CONTEXT
+
+#define log_trace(log, ...) log_message(log, log_level_trace, __VA_ARGS__)
+#define log_info(log, ...)  log_message(log, log_level_info, __VA_ARGS__)
+#define log_warn(log, ...)  log_message(log, log_level_warn, __VA_ARGS__)
+#define log_error(log, ...) log_message(log, log_level_error, __VA_ARGS__)
+
+#endif // LOG_INCLUDE_CONTEXT
 
 #endif // LOG_H

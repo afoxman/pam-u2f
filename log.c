@@ -28,8 +28,9 @@ static bool is_log_level_valid(log_level_t level) {
     case log_level_warn:
     case log_level_error:
       return true;
+    default:
+      return false;
   }
-  return false;
 }
 
 static const char *get_log_level_name(log_level_t level) {
@@ -42,8 +43,9 @@ static const char *get_log_level_name(log_level_t level) {
       return "INFO";
     case log_level_trace:
       return "TRACE";
+    default:
+      return NULL;
   }
-  return NULL;
 }
 
 static int get_log_level_as_syslog_level(log_level_t level) {
@@ -56,8 +58,9 @@ static int get_log_level_as_syslog_level(log_level_t level) {
       return LOG_WARNING;
     case log_level_error:
       return LOG_ERR;
+    default:
+      return LOG_INFO;
   }
-  return LOG_INFO;
 }
 
 static log_t* log_alloc(void) {
@@ -124,102 +127,83 @@ log_level_t log_get_minimum_level(const log_t *log) {
   return log->minimum_level;
 }
 
-ATTRIBUTE_FORMAT(printf, 3, 0)
-static size_t format_string_v(char *buffer, size_t length, const char *format, va_list ap) {
-  int count = vsnprintf(buffer, length, format, ap);
-  if (count < 0)
-    count = 0;
-  else if ((size_t)count > length)
-    count = (int)length;
+static char *copy(char *ptr, const char *end, const char *s) {
+  size_t avail = end - ptr;
+  if (avail > 0) {
+    size_t len = strlen(s);
+    if (len + 1 > avail)
+      len = avail - 1;
 
-  if ((size_t)count < length)
-    buffer[count] = '\0';
-
-  return count;
+    memcpy(ptr, s, len);
+    ptr += len;
+    *ptr = '\0';
+  }
+  return ptr;
 }
 
-ATTRIBUTE_FORMAT(printf, 3, 4)
-static size_t format_string(char *buffer, size_t length, const char *format, ...) {
-  va_list ap;
-  size_t count;
-
-  va_start(ap, format);
-  count = format_string_v(buffer, length, format, ap);
-  va_end(ap);
-
-  return count;
-}
-
-ATTRIBUTE_FORMAT(printf, 8, 0)
 static void format_log_message(
-    char *buffer, size_t buffer_len,
-    const char *prefix, 
+    char *ptr, const char *end,
+    const char *level, 
+    const char *prefix,
     const char *filename, int line, const char *function,
-    const char *level,
     const char *format, va_list ap) {
 
-  size_t count;
+  if (level) {
+    ptr = copy(ptr, end, level);
+    ptr = copy(ptr, end, ": ");
+  }
 
   if (prefix) {
-    count = format_string(buffer, buffer_len, "%s: ", prefix);
-    buffer += count;
-    buffer_len -= count;
+    ptr = copy(ptr, end, prefix);
+    ptr = copy(ptr, end, ": ");
   }
+
   if (filename && function) {
-    count = format_string(buffer, buffer_len, "%s:%d (%s): ", filename, line, function);
-    buffer += count;
-    buffer_len -= count;
+    const char *last_slash;
+    if ((last_slash = strrchr(filename, '/')) != NULL)
+      filename = last_slash + 1;
+
+    snprintf(ptr, end - ptr, "%s:%d (%s): ", filename, line, function);
+    while (ptr < end && '\0' != *ptr)
+      ptr++;
   }
-  if (level) {
-    count = format_string(buffer, buffer_len, "%s: ", level);
-    buffer += count;
-    buffer_len -= count;
-  }
-  format_string_v(buffer, buffer_len, format, ap);
+
+  if (ptr < end)
+    vsnprintf(ptr, end - ptr, format, ap);
 }
 
-ATTRIBUTE_FORMAT(printf, 6, 0)
 static void log_message_internal(
-    const log_t *log, log_level_t level, 
+    const log_t *log, log_level_t level,
     const char *filename, int line, const char *function,
     const char *format, va_list ap) {
-
-  char message[LOG_MESSAGE_MAX];
-
-  if (log_output_type_file == log->output_type) {
-    format_log_message(message, sizeof(message), log->prefix, filename, line, function, get_log_level_name(level), format, ap);
-    fprintf(log->file, "%s\n", message);
-  } else if (log_output_type_syslog == log->output_type) {
-    format_log_message(message, sizeof(message), log->prefix, filename, line, function, NULL, format, ap);
-    syslog(log->syslog_facility | get_log_level_as_syslog_level(level), "%s", message);
+  if (log && level >= log->minimum_level) {
+    char message[LOG_MESSAGE_MAX];
+    char *end = message + sizeof(message);
+    if (log_output_type_file == log->output_type) {
+      format_log_message(message, end, get_log_level_name(level), log->prefix, filename, line, function, format, ap);
+      fprintf(log->file, "%s\n", message);
+    } else if (log_output_type_syslog == log->output_type) {
+      format_log_message(message, end, NULL, log->prefix, filename, line, function, format, ap);
+      syslog(log->syslog_facility | get_log_level_as_syslog_level(level), "%s", message);
+    }
   }
-}
-
-static const char *get_basename(const char *filename) {
-  const char *last_slash;
-
-  if (!filename)
-    return NULL;
-
-  last_slash = strrchr(filename, '/');
-  if (last_slash)
-    return last_slash + 1;
-
-  return filename;
 }
 
 void log_message(
-    const log_t *log,
-    const char *filename, int line, const char *function,
-    log_level_t level, 
+    const log_t *log, log_level_t level, 
     const char *format, ...) {
-
   va_list ap;
-
-  if (!log || level < log->minimum_level)
-    return;
-
   va_start(ap, format);
-  log_message_internal(log, level, get_basename(filename), line, function, format, ap);
+  log_message_internal(log, level, NULL, 0, NULL, format, ap);
+  va_end(ap);
+}
+
+void log_message_with_context(
+    const log_t *log, log_level_t level, 
+    const char *filename, int line, const char *function, 
+    const char *format, ...) {
+  va_list ap;
+  va_start(ap, format);
+  log_message_internal(log, level, filename, line, function, format, ap);
   va_end(ap);
 }

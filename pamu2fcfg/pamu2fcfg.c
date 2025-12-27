@@ -547,7 +547,7 @@ static void parse_args(int argc, char *argv[], struct args *args) {
 int main(int argc, char *argv[]) {
   int exit_code = EXIT_FAILURE;
   struct args args = {0};
-  const log_t *log = NULL;
+  log_t *log = NULL;
   fido_cred_t *cred = NULL;
   fido_assert_t *assert = NULL;
   fido_dev_info_t *devlist = NULL;

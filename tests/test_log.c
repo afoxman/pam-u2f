@@ -3,11 +3,12 @@
  */
 
 #undef NDEBUG
-#define DEBUG_PAM // Enable file/line/function data in log messages
+#define LOG_INCLUDE_CONTEXT
 
 #include <assert.h>
 #include <stdarg.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <syslog.h>
 #include <unistd.h>
@@ -135,7 +136,7 @@ static void test_file_message_contains_prefix(void) {
   assert_ok(fclose(file));
 }
 
-#ifdef DEBUG_PAM
+#ifdef LOG_INCLUDE_CONTEXT
 
 static void test_file_message_contains_source_file(void) {
   const char *message = "This is a test message";
@@ -159,7 +160,7 @@ static void test_file_message_contains_source_function(void) {
   assert_ok(fclose(file));
 }
 
-#endif // DEBUG_PAM
+#endif // LOG_INCLUDE_CONTEXT
 
 static void test_file_message_contains_log_level_name(void) {
   const char *message = "This is a test message";
@@ -180,11 +181,11 @@ int main(void) {
   test_syslog_info_is_logged();
   test_syslog_trace_is_skipped();
 
-#ifdef DEBUG_PAM
   test_file_message_contains_prefix();
+#ifdef LOG_INCLUDE_CONTEXT
   test_file_message_contains_source_file();
   test_file_message_contains_source_function();
-#endif // DEBUG_PAM
+#endif // LOG_INCLUDE_CONTEXT
   test_file_message_contains_log_level_name();
 
   return 0;
