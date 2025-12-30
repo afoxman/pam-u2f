@@ -334,7 +334,7 @@ static int verify_cred(const log_t *log, const fido_cred_t *const cred) {
 static int print_authfile_line(const log_t *log, 
                                const struct args *const args,
                                const fido_cred_t *const cred,
-                               const char* ep) {
+                               const char *encrypted_password) {
   const unsigned char *kh = NULL;
   const unsigned char *pk = NULL;
   const char *user = NULL;
@@ -387,7 +387,7 @@ static int print_authfile_line(const log_t *log,
          !args->no_user_presence ? "+presence" : "",
          args->user_verification ? "+verification" : "",
          args->pin_verification ? "+pin" : "",
-         ep ? ep : "*");
+         encrypted_password ? encrypted_password : "*");
 
   ok = 0;
 
@@ -560,10 +560,8 @@ int main(int argc, char *argv[]) {
   fido_opt_t up;
   fido_opt_t uv;
   char password[BUFSIZE];
-  ep_params_t ep_params;
-  unsigned char *ep = NULL;
-  size_t ep_len;
-  char *ep_serialized = NULL;
+  unsigned char hmac_salt[HMAC_SALT_LENGTH];
+  char *encrypted_password = NULL;
   size_t ndevs = 0;
   int devopts = 0;
   int r;
@@ -673,9 +671,9 @@ int main(int argc, char *argv[]) {
   if (args.password) {
     up = args.no_user_presence != 0 ? FIDO_OPT_TRUE : FIDO_OPT_OMIT;
 
-    if (!generate_ep_params(log, &ep_params))
+    if (!generate_hmac_salt(log, hmac_salt))
       goto err;
- 
+
     assert = prepare_assert(log, fido_cred_rp_name(cred),
       fido_cred_id_ptr(cred), fido_cred_id_len(cred), up, uv);
     if (!assert)
@@ -688,7 +686,7 @@ int main(int argc, char *argv[]) {
       goto err;
     }
 
-    r = fido_assert_set_hmac_salt(assert, ep_params.hmac_salt, sizeof(ep_params.hmac_salt));
+    r = fido_assert_set_hmac_salt(assert, hmac_salt, sizeof(hmac_salt));
     if (r != FIDO_OK) {
       log_error(log, "fido_assert_set_hmac_salt: %s (%d)", fido_strerr(r), r);
       goto err;
@@ -719,25 +717,26 @@ int main(int argc, char *argv[]) {
       goto err;
     }
 
-    if (!encrypt_password(log, &ep_params, 
-                          fido_assert_hmac_secret_ptr(assert, 0),
-                          fido_assert_hmac_secret_len(assert, 0),
-                          password, &ep, &ep_len))
-      goto err;
-
-    ep_serialized = serialize_ep(log, &ep_params, ep, ep_len);
-    if (!ep_serialized)
+    if (!encrypt_password(
+        log, 
+        fido_cred_user_name(cred),
+        fido_cred_id_ptr(cred),
+        fido_cred_id_len(cred),
+        hmac_salt,
+        fido_assert_hmac_secret_ptr(assert, 0),
+        fido_assert_hmac_secret_len(assert, 0),
+        password,
+        &encrypted_password))
       goto err;
   }
 
-  if (print_authfile_line(log, &args, cred, ep_serialized) != 0)
+  if (print_authfile_line(log, &args, cred, encrypted_password) != 0)
     goto err;
 
   exit_code = EXIT_SUCCESS;
 
 err:
-  free(ep_serialized);
-  free(ep);
+  free(encrypted_password);
   explicit_bzero(password, sizeof(password));
   explicit_bzero(pin, sizeof(pin));
   if (dev != NULL)

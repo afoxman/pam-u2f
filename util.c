@@ -1180,16 +1180,15 @@ err:
   return ok;
 }
 
-int do_authentication(const log_t *log, const cfg_t *cfg, 
+int do_authentication(const log_t *log, const cfg_t *cfg, const char *user,
                       const device_t *devices, const unsigned n_devs, 
                       pam_handle_t *pamh) {
   fido_assert_t *assert = NULL;
   fido_dev_info_t *devlist = NULL;
   fido_dev_t **authlist = NULL;
   int cued = 0;
-  ep_params_t ep_params;
-  unsigned char *ep = NULL;
-  size_t ep_len;
+  bool has_encrypted_password = false;
+  unsigned char hmac_salt[HMAC_SALT_LENGTH];
   int r;
   int retval = PAM_AUTH_ERR;
   size_t ndevs = 0;
@@ -1274,20 +1273,25 @@ int do_authentication(const log_t *log, const cfg_t *cfg,
           goto out;
         }
 
-        if (strcmp(devices[i].encryptedPassword, "*") != 0) {
-          free(ep);
-          ep = NULL;
-
-          if (!deserialize_ep(log, devices[i].encryptedPassword, &ep_params, &ep, &ep_len))
+        has_encrypted_password = 0 != strcmp(devices[i].encryptedPassword, "*");
+        if (has_encrypted_password) {
+          if (!get_hmac_salt_from_encrypted_password(
+              log, devices[i].encryptedPassword, hmac_salt))
             goto out;
 
-          if ((r = fido_assert_set_extensions(assert, FIDO_EXT_HMAC_SECRET)) != FIDO_OK) {
-            log_error(log, "fido_assert_set_extensions(FIDO_EXT_HMAC_SECRET): %s (%d)", fido_strerr(r), r);
+          r = fido_assert_set_extensions(assert, FIDO_EXT_HMAC_SECRET);
+          if (r != FIDO_OK) {
+            log_error(log, 
+                      "fido_assert_set_extensions(HMAC_SECRET): %s (%d)", 
+                      fido_strerr(r), r);
             goto out;
           }
 
-          if ((r = fido_assert_set_hmac_salt(assert, ep_params.hmac_salt, sizeof(ep_params.hmac_salt))) != FIDO_OK) {
-            log_error(log, "fido_assert_set_hmac_salt: %s (%d)", fido_strerr(r), r);
+          r = fido_assert_set_hmac_salt(assert, hmac_salt, sizeof(hmac_salt));
+          if (r != FIDO_OK) {
+            log_error(log, 
+                      "fido_assert_set_hmac_salt: %s (%d)", 
+                      fido_strerr(r), r);
             goto out;
           }
         }
@@ -1322,19 +1326,26 @@ int do_authentication(const log_t *log, const cfg_t *cfg,
           }
           r = fido_assert_verify(assert, 0, pk.type, pk.ptr);
           if (r == FIDO_OK) {
-            if (ep != NULL) {
+            if (has_encrypted_password) {
               char *password = NULL;
               int retval_authtok = PAM_SUCCESS;
-              if (decrypt_password(log, &ep_params, 
-                                    fido_assert_hmac_secret_ptr(assert, 0),
-                                    fido_assert_hmac_secret_len(assert, 0),
-                                    ep, ep_len, &password)) {
+
+              if (decrypt_password(
+                    log, 
+                    user,
+                    fido_assert_id_ptr(assert, 0),
+                    fido_assert_id_len(assert, 0),
+                    fido_assert_hmac_secret_ptr(assert, 0),
+                    fido_assert_hmac_secret_len(assert, 0),
+                    devices[i].encryptedPassword,
+                    &password)) {
                 retval_authtok = pam_set_item(pamh, PAM_AUTHTOK, password);
                 explicit_bzero(password, strlen(password));
                 free(password);
               }
               if (retval_authtok != PAM_SUCCESS) {
-                log_error(log, "pam_set_item(PAM_AUTHTOK): %s (%d)", pam_strerror(pamh, r), r);
+                log_error(log, "pam_set_item(PAM_AUTHTOK): %s (%d)", 
+                  pam_strerror(pamh, r), r);
                 retval = retval_authtok;
                 goto out;
               }
@@ -1383,7 +1394,6 @@ int do_authentication(const log_t *log, const cfg_t *cfg,
   }
 
 out:
-  free(ep);
   reset_pk(&pk);
   fido_assert_free(&assert);
   fido_dev_info_free(&devlist, ndevs);
@@ -1626,21 +1636,4 @@ int random_bytes(void *buf, size_t cnt) {
     return (0);
 
   return (1);
-}
-
-char *format(const char *fmt, ...) {
-  va_list ap_scan, ap_format;
-  size_t count;
-  char *out = NULL;
-
-  va_start(ap_scan, fmt);
-  va_copy(ap_format, ap_scan);
-  count = vsnprintf(NULL, 0, fmt, ap_scan);
-  out = malloc(count + 1);
-  if (out)
-    vsnprintf(out, count + 1, fmt, ap_format);
-  va_end(ap_scan);
-  va_end(ap_format);
-
-  return out;
 }
