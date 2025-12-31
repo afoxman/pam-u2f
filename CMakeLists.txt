@@ -154,6 +154,7 @@ set(PAM_U2F_SOURCES
 	pam-u2f.c
 	b64.c
 	cfg.c
+	debug.c
 	crypt.c
 	drop_privs.h
 	expand.c

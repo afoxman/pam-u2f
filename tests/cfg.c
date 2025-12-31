@@ -155,49 +155,49 @@ static void test_regular(void) {
 
   struct conf_file cf;
   int r;
-  cfg_t cfg, cfg_defaults;
+  cfg_t *cfg, *cfg_defaults;
 
   conf_file_init(&cf, NULL);
   argv[0] = cf.arg;
 
   // 1. Load the default
-  r = cfg_init(&cfg_defaults, 0, 1, argv);
+  r = cfg_init(&cfg_defaults, 0, 1, argv, NULL);
   assert(r == PAM_SUCCESS);
 
   // 2. Write the configuration file, changing every field.
-  config_flip_all(&cf, &cfg_defaults);
+  config_flip_all(&cf, cfg_defaults);
 
   // 3. Load from the file
-  r = cfg_init(&cfg, 0, sizeof(argv) / sizeof(*argv), argv);
+  r = cfg_init(&cfg, 0, sizeof(argv) / sizeof(*argv), argv, NULL);
   assert(r == PAM_SUCCESS);
   conf_file_clear(&cf);
 
   // 4. Assert that every field is different from the default.
-  assert(cfg.max_devs != cfg_defaults.max_devs);
-  assert(cfg.manual != cfg_defaults.manual);
-  assert(cfg.debug != cfg_defaults.debug);
-  assert(cfg.nouserok != cfg_defaults.nouserok);
-  assert(cfg.openasuser != cfg_defaults.openasuser);
-  assert(cfg.alwaysok != cfg_defaults.alwaysok);
-  assert(cfg.interactive != cfg_defaults.interactive);
-  assert(cfg.cue != cfg_defaults.cue);
-  assert(cfg.nodetect != cfg_defaults.nodetect);
-  assert(cfg.userpresence != cfg_defaults.userpresence);
-  assert(cfg.userverification != cfg_defaults.userverification);
-  assert(cfg.pinverification != cfg_defaults.pinverification);
-  assert(cfg.sshformat != cfg_defaults.sshformat);
-  assert(cfg.expand != cfg_defaults.expand);
+  assert(cfg->max_devs != cfg_defaults->max_devs);
+  assert(cfg->manual != cfg_defaults->manual);
+  assert(cfg->debug != cfg_defaults->debug);
+  assert(cfg->nouserok != cfg_defaults->nouserok);
+  assert(cfg->openasuser != cfg_defaults->openasuser);
+  assert(cfg->alwaysok != cfg_defaults->alwaysok);
+  assert(cfg->interactive != cfg_defaults->interactive);
+  assert(cfg->cue != cfg_defaults->cue);
+  assert(cfg->nodetect != cfg_defaults->nodetect);
+  assert(cfg->userpresence != cfg_defaults->userpresence);
+  assert(cfg->userverification != cfg_defaults->userverification);
+  assert(cfg->pinverification != cfg_defaults->pinverification);
+  assert(cfg->sshformat != cfg_defaults->sshformat);
+  assert(cfg->expand != cfg_defaults->expand);
 
-  assert(str_opt_cmp(cfg.auth_file, cfg_defaults.auth_file));
-  assert(str_opt_cmp(cfg.authpending_file, cfg_defaults.authpending_file));
-  assert(str_opt_cmp(cfg.origin, cfg_defaults.origin));
-  assert(str_opt_cmp(cfg.appid, cfg_defaults.appid));
-  assert(str_opt_cmp(cfg.prompt, cfg_defaults.prompt));
-  assert(str_opt_cmp(cfg.cue_prompt, cfg_defaults.cue_prompt));
-  assert(str_opt_cmp(cfg.debug_file, cfg_defaults.debug_file));
+  assert(str_opt_cmp(cfg->auth_file, cfg_defaults->auth_file));
+  assert(str_opt_cmp(cfg->authpending_file, cfg_defaults->authpending_file));
+  assert(str_opt_cmp(cfg->origin, cfg_defaults->origin));
+  assert(str_opt_cmp(cfg->appid, cfg_defaults->appid));
+  assert(str_opt_cmp(cfg->prompt, cfg_defaults->prompt));
+  assert(str_opt_cmp(cfg->cue_prompt, cfg_defaults->cue_prompt));
+  assert(str_opt_cmp(cfg->debug_file, cfg_defaults->debug_file));
 
-  cfg_free(&cfg_defaults);
-  cfg_free(&cfg);
+  cfg_free(cfg_defaults);
+  cfg_free(cfg);
 }
 
 static void test_config_abspath(void) {
@@ -211,7 +211,7 @@ static void test_config_abspath(void) {
     "debug", // So we have a log file for the test
   };
   int r;
-  cfg_t cfg;
+  cfg_t *cfg = NULL;
 
   // 1. Generate a valid configuration and pass it around
   //    as relative path.  Assert failure.
@@ -223,7 +223,7 @@ static void test_config_abspath(void) {
   assert(r == 0);
 
   argv[0] = cf.arg;
-  r = cfg_init(&cfg, 0, sizeof(argv) / sizeof(*argv), argv);
+  r = cfg_init(&cfg, 0, sizeof(argv) / sizeof(*argv), argv, NULL);
   assert(r == PAM_SERVICE_ERR);
   conf_file_clear(&cf);
 
@@ -237,13 +237,13 @@ static void test_config_abspath(void) {
   assert(r == 0);
 
   argv[0] = cf.arg;
-  r = cfg_init(&cfg, 0, sizeof(argv) / sizeof(*argv), argv);
+  r = cfg_init(&cfg, 0, sizeof(argv) / sizeof(*argv), argv, NULL);
   assert(r == PAM_SUCCESS);
 
-  assert(strcmp(cfg.prompt, "hello") == 0);
+  assert(strcmp(cfg->prompt, "hello") == 0);
   conf_file_clear(&cf);
 
-  cfg_free(&cfg);
+  cfg_free(cfg);
 }
 
 static void test_last_config_wins(void) {
@@ -253,7 +253,7 @@ static void test_last_config_wins(void) {
   const char *argv[3] = {NULL, NULL, "debug"};
   struct conf_file cf_1, cf_2;
   int r;
-  cfg_t cfg;
+  cfg_t *cfg;
 
   conf_file_init(&cf_1, NULL);
   conf_file_init(&cf_2, NULL);
@@ -265,17 +265,17 @@ static void test_last_config_wins(void) {
 
   argv[0] = cf_1.arg;
   argv[1] = cf_2.arg;
-  r = cfg_init(&cfg, 0, sizeof(argv) / sizeof(*argv), argv);
+  r = cfg_init(&cfg, 0, sizeof(argv) / sizeof(*argv), argv, NULL);
   assert(r == PAM_SUCCESS);
-  assert(cfg.max_devs == 12);
-  cfg_free(&cfg);
+  assert(cfg->max_devs == 12);
+  cfg_free(cfg);
 
   argv[0] = cf_2.arg;
   argv[1] = cf_1.arg;
-  r = cfg_init(&cfg, 0, sizeof(argv) / sizeof(*argv), argv);
+  r = cfg_init(&cfg, 0, sizeof(argv) / sizeof(*argv), argv, NULL);
   assert(r == PAM_SUCCESS);
-  assert(cfg.max_devs == 10);
-  cfg_free(&cfg);
+  assert(cfg->max_devs == 10);
+  cfg_free(cfg);
 
   conf_file_clear(&cf_1);
   conf_file_clear(&cf_2);
@@ -287,16 +287,16 @@ static void test_file_corner_cases(void) {
   const char *argv[] = {NULL, "debug"};
   struct conf_file cf;
   int r;
-  cfg_t cfg;
+  cfg_t *cfg;
   char buffer[CFG_MAX_FILE_SIZE];
 
   conf_file_init(&cf, NULL);
   argv[0] = cf.arg;
 
   // 1. Empty file -> Success
-  r = cfg_init(&cfg, 0, sizeof(argv) / sizeof(*argv), argv);
+  r = cfg_init(&cfg, 0, sizeof(argv) / sizeof(*argv), argv, NULL);
   assert(r == PAM_SUCCESS);
-  cfg_free(&cfg);
+  cfg_free(cfg);
 
   // 2. File size within limit -> Success
   memset(buffer, ' ', sizeof(buffer));
@@ -305,28 +305,28 @@ static void test_file_corner_cases(void) {
   assert(!r);
   r = fflush(cf.out);
   assert(r == 0);
-  r = cfg_init(&cfg, 0, sizeof(argv) / sizeof(*argv), argv);
+  r = cfg_init(&cfg, 0, sizeof(argv) / sizeof(*argv), argv, NULL);
   assert(r == PAM_SUCCESS);
-  cfg_free(&cfg);
+  cfg_free(cfg);
 
   // 3. File size beyond limit -> Failure
   r = fwrite("manual\n", strlen("manual\n"), 1, cf.out) != 1;
   assert(!r);
   r = fflush(cf.out);
   assert(r == 0);
-  r = cfg_init(&cfg, 0, sizeof(argv) / sizeof(*argv), argv);
+  r = cfg_init(&cfg, 0, sizeof(argv) / sizeof(*argv), argv, NULL);
   assert(r == PAM_SERVICE_ERR);
 
   // 4. Missing file -> Failure
   argv[0] = "conf=/not/the/droids/you/are/looking/for";
-  r = cfg_init(&cfg, 0, sizeof(argv) / sizeof(*argv), argv);
+  r = cfg_init(&cfg, 0, sizeof(argv) / sizeof(*argv), argv, NULL);
   assert(r == PAM_SERVICE_ERR);
 
   conf_file_clear(&cf);
 }
 
 static void test_file_parser(void) {
-  cfg_t cfg_defaults, cfg;
+  cfg_t *cfg_defaults, *cfg;
   const char *argv[] = {
     NULL, "debug",
     "cu", // not 'cue'
@@ -337,21 +337,21 @@ static void test_file_parser(void) {
   conf_file_init(&cf, NULL);
   argv[0] = cf.arg;
 
-  r = cfg_init(&cfg_defaults, 0, 1, argv);
+  r = cfg_init(&cfg_defaults, 0, 1, argv, NULL);
   assert(r == PAM_SUCCESS);
 
   // Defaults are unlikely to change, but if they do
   // the test might be invalidated.
-  assert(!cfg_defaults.alwaysok);
-  assert(!cfg_defaults.prompt);
-  assert(!cfg_defaults.cue_prompt);
-  assert(!cfg_defaults.auth_file);
-  assert(!cfg_defaults.interactive);
-  assert(!cfg_defaults.cue);
-  assert(!cfg_defaults.origin);
-  assert(!cfg_defaults.appid);
-  assert(!cfg_defaults.appid);
-  assert(!cfg_defaults.authpending_file);
+  assert(!cfg_defaults->alwaysok);
+  assert(!cfg_defaults->prompt);
+  assert(!cfg_defaults->cue_prompt);
+  assert(!cfg_defaults->auth_file);
+  assert(!cfg_defaults->interactive);
+  assert(!cfg_defaults->cue);
+  assert(!cfg_defaults->origin);
+  assert(!cfg_defaults->appid);
+  assert(!cfg_defaults->appid);
+  assert(!cfg_defaults->authpending_file);
 
   fputs("   \n", cf.out);
   fputs("  # interactive \n", cf.out);
@@ -367,21 +367,21 @@ static void test_file_parser(void) {
   fputs("authpending_file =else\n", cf.out);
   fflush(cf.out);
 
-  r = cfg_init(&cfg, 0, sizeof(argv) / sizeof(*argv), argv);
+  r = cfg_init(&cfg, 0, sizeof(argv) / sizeof(*argv), argv, NULL);
   assert(r == PAM_SUCCESS);
 
-  assert(cfg.alwaysok);
-  assert(strcmp(cfg.prompt, "C:/>") == 0);
-  assert(strcmp(cfg.cue_prompt, "=C:/ >") == 0);
-  assert(strcmp(cfg.auth_file, "/dev/null") == 0);
-  assert(cfg.interactive);
-  assert(!cfg.cue);
-  assert(!cfg.origin);
-  assert(strcmp(cfg.appid, "something") == 0);
-  assert(strcmp(cfg.authpending_file, "else") == 0);
+  assert(cfg->alwaysok);
+  assert(strcmp(cfg->prompt, "C:/>") == 0);
+  assert(strcmp(cfg->cue_prompt, "=C:/ >") == 0);
+  assert(strcmp(cfg->auth_file, "/dev/null") == 0);
+  assert(cfg->interactive);
+  assert(!cfg->cue);
+  assert(!cfg->origin);
+  assert(strcmp(cfg->appid, "something") == 0);
+  assert(strcmp(cfg->authpending_file, "else") == 0);
 
-  cfg_free(&cfg_defaults);
-  cfg_free(&cfg);
+  cfg_free(cfg_defaults);
+  cfg_free(cfg);
   conf_file_clear(&cf);
 }
 

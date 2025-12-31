@@ -22,7 +22,7 @@
  * DEALINGS IN THE SOFTWARE.
  */
 
- /* 
+/* 
  * Cryptographic Algorithms for Secure Password Storage and Update
  * Using a FIDO2 Authenticator
  *

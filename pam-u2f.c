@@ -85,52 +85,6 @@ static char *resolve_authfile_path(const log_t *log, const cfg_t *cfg,
   return authfile;
 }
 
-static FILE *open_log_file(const char *filename, bool *is_console_file) {
-  struct stat st;
-  FILE *file;
-  int fd;
-
-  *is_console_file = false;
-
-  if (!filename) {
-    *is_console_file = true;
-    return stderr;
-  }
-  if (strcmp(filename, "stdout") == 0) {
-    *is_console_file = true;
-    return stdout;
-  }
-  if (strcmp(filename, "stderr") == 0) {
-    *is_console_file = true;
-    return stderr;
-  }
-  if (strcmp(filename, "syslog") == 0)
-    return NULL;
-
-  fd = open(filename, O_WRONLY | O_APPEND | O_CLOEXEC | O_NOFOLLOW | O_NOCTTY);
-  if (fd == -1 || fstat(fd, &st) != 0)
-    goto err;
-
-#ifndef WITH_FUZZING
-  if (!S_ISREG(st.st_mode))
-    goto err;
-#endif
-
-  if ((file = fdopen(fd, "a")) != NULL)
-    return file;
-
-err:
-  if (fd != -1)
-    close(fd);
-
-  *is_console_file = true;
-  return stderr; /* fallback to default */
-}
-
-static void close_log_file(FILE *f) {
-  if (f != NULL && f != stdout && f != stderr)
-    fclose(f);
-}
 
 typedef struct pam_api_context {
   pam_handle_t *pamh;
@@ -138,7 +92,7 @@ typedef struct pam_api_context {
   int argc;
   const char **argv;
 
-  cfg_t cfg;
+  cfg_t *cfg;
   char *buffer_origin;
   char *buffer_appid;
   char *buffer_auth_file;
@@ -158,43 +112,43 @@ typedef struct pam_api_context {
   int open_authfile_as_user;
 } pam_api_context_t;
 
+static void free_pam_api_context(pam_api_context_t *ctx)
+{
+  if (ctx) {
+    free(ctx->buffer_pass_strings);
+    free_devices(ctx->devices, ctx->devices_len);
+    free(ctx->buffer_authpending_file);
+    free(ctx->buffer_auth_file);
+    free(ctx->buffer_appid);
+    free(ctx->buffer_origin);
+    cfg_free(ctx->cfg);
+    free(ctx);
+  }
+}
+
 static bool init_pam_api_context(const char *api_name, pam_handle_t *pamh, 
-  int flags, int argc, const char **argv, pam_api_context_t *ctx)
+  int flags, int argc, const char **argv, pam_api_context_t **ctx_ptr)
 {
   int result = PAM_ABORT;
-  cfg_t *cfg = NULL;
-  bool log_is_using_console = false;
-  log_level_t minimum_level;
-  log_t *log = NULL;
+  pam_api_context_t *ctx = NULL;
+  cfg_t *cfg;
+  log_t *log;
 
-  memset(ctx, 0, sizeof(*ctx));
+  ctx = calloc(1, sizeof(*ctx));
+  if (!ctx)
+    return PAM_BUF_ERR;
+
   ctx->pamh = pamh;
   ctx->flags = flags;
   ctx->argc = argc;
   ctx->argv = argv;
 
-  result = cfg_init(&ctx->cfg, flags, argc, argv);
+  result = cfg_init(&ctx->cfg, flags, argc, argv, api_name);
   if (result != PAM_SUCCESS)
     goto err;
 
-  cfg = &ctx->cfg;
-
-  ctx->log_file = open_log_file(ctx->cfg.debug_file, &log_is_using_console);
-  minimum_level = ctx->cfg.debug ? log_level_trace : log_level_info;
- 
-  // When PAM_SILENT is set, we aren't allowed to log to the console.
-  if (0 == (flags & PAM_SILENT) || !log_is_using_console) {
-    ctx->log = ctx->log_file ? 
-      log_create_using_file(minimum_level, LOG_PREFIX, ctx->log_file) :
-      log_create_using_syslog(minimum_level, LOG_PREFIX, LOG_AUTHPRIV);
-    
-    log = ctx->log;
-  }
- 
-  log_trace(log, "%s: flags %d argc %d", api_name, flags, argc);
-  for (int i = 0; i < argc; i++)
-    log_trace(log, "argv[%d]=%s", i, argv[i]);
-  cfg_log(log, cfg);
+  cfg = ctx->cfg;
+  log = ctx->log;
 
   if (!cfg->origin) {
     char buffer[BUFSIZE];
@@ -313,27 +267,13 @@ static bool init_pam_api_context(const char *api_name, pam_handle_t *pamh,
   if (!ctx->open_authfile_as_user)
     ctx->open_authfile_as_user = geteuid() == 0 && cfg->openasuser;
 
+  *ctx_ptr = ctx;
+  ctx = NULL;
   result = PAM_SUCCESS;
 
 err:
+  free_pam_api_context(ctx);
   return result;
-}
-
-static void cleanup_pam_api_context(pam_api_context_t *ctx)
-{
-  if (ctx) {
-    free(ctx->buffer_pass_strings);
-    free_devices(ctx->devices, ctx->devices_len);
-    log_destroy(&ctx->log);
-    close_log_file(ctx->log_file);
-    free(ctx->buffer_authpending_file);
-    free(ctx->buffer_auth_file);
-    free(ctx->buffer_appid);
-    free(ctx->buffer_origin);
-    cfg_free(&ctx->cfg);
-
-    memset(ctx, 0, sizeof(*ctx));
-  }
 }
 
 /* PAM entry point for authentication verification */
@@ -342,7 +282,7 @@ int pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc,
 {
 
   int retval = PAM_ABORT;
-  pam_api_context_t ctx;
+  pam_api_context_t *ctx = NULL;
   cfg_t *cfg = NULL;
   log_t *log = NULL;
   PAM_MODUTIL_DEF_PRIVS(privs);
@@ -351,26 +291,26 @@ int pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc,
   if (PAM_SUCCESS != retval)
     goto done;
 
-  cfg = &ctx.cfg;
-  log = ctx.log;
+  cfg = ctx->cfg;
+  log = ctx->log;
 
   log_trace(log, "Using authentication file %s", cfg->auth_file);
 
-  if (ctx.open_authfile_as_user) {
+  if (ctx->open_authfile_as_user) {
     log_trace(log, "Dropping privileges");
-    if (pam_modutil_drop_priv(ctx.pamh, &privs, ctx.pass)) {
-      log_error(log, "Unable to switch user to uid %i", ctx.pass->pw_uid);
+    if (pam_modutil_drop_priv(ctx->pamh, &privs, ctx->pass)) {
+      log_error(log, "Unable to switch user to uid %i", ctx->pass->pw_uid);
       retval = PAM_SYSTEM_ERR;
       goto done;
     }
-    log_trace(log, "Switched to uid %i", ctx.pass->pw_uid);
+    log_trace(log, "Switched to uid %i", ctx->pass->pw_uid);
   }
 
-  retval = get_devices_from_authfile(log, cfg, ctx.user, 
-    ctx.devices, &ctx.devices_len);
+  retval = get_devices_from_authfile(log, cfg, ctx->user, 
+    ctx->devices, &ctx->devices_len);
 
-  if (ctx.open_authfile_as_user) {
-    if (pam_modutil_regain_priv(ctx.pamh, &privs)) {
+  if (ctx->open_authfile_as_user) {
+    if (pam_modutil_regain_priv(ctx->pamh, &privs)) {
       log_error(log, "could not restore privileges");
       retval = PAM_SYSTEM_ERR;
       goto done;
@@ -388,9 +328,9 @@ int pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc,
     int actual_size =
       snprintf(buffer, BUFSIZE, DEFAULT_AUTHPENDING_FILE_PATH, getuid());
     if (actual_size >= 0 && actual_size < BUFSIZE) {
-      ctx.buffer_authpending_file = strdup(buffer);
+      ctx->buffer_authpending_file = strdup(buffer);
     }
-    cfg->authpending_file = ctx.buffer_authpending_file;
+    cfg->authpending_file = ctx->buffer_authpending_file;
     if (!cfg->authpending_file) {
       log_error(log, "Unable to allocate memory for the authpending_file, "
                      "touch request notifications will not be emitted");
@@ -423,10 +363,10 @@ int pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc,
     if (cfg->interactive) {
       interactive_prompt(pamh, cfg);
     }
-    retval = do_authentication(log, cfg, ctx.user, ctx.devices, 
-      ctx.devices_len, pamh);
+    retval = do_authentication(log, cfg, ctx->user, ctx->devices, 
+      ctx->devices_len, pamh);
   } else {
-    retval = do_manual_authentication(log, cfg, ctx.devices, ctx.devices_len, 
+    retval = do_manual_authentication(log, cfg, ctx->devices, ctx->devices_len, 
       pamh);
   }
 
@@ -445,7 +385,7 @@ done:
   }
   log_trace(log, "done. [%s]", pam_strerror(pamh, retval));
 
-  cleanup_pam_api_context(&ctx);
+  free_pam_api_context(ctx);
 
   return retval;
 }
@@ -454,7 +394,7 @@ static int update_encrypted_passwords(pam_api_context_t *ctx,
   const char *old_password, const char *new_password) 
 {
   int result = PAM_AUTH_ERR;
-  cfg_t *cfg = &ctx->cfg;
+  cfg_t *cfg = ctx->cfg;
   log_t *log = ctx->log;
   char **encrypted_passwords = NULL;
   size_t encrypted_passwords_len = 0;
@@ -502,7 +442,7 @@ static int update_encrypted_passwords(pam_api_context_t *ctx,
 
   if (dirty) {
 
-//#error here -- need to rework the file-reading code so it can be used for both reading and writing
+#error here -- need to rework the file-reading code so it can be used for both reading and writing
 
     // scan the entire file
     //   find the last line for this user ==> this is the one we're going to replace 
@@ -549,7 +489,7 @@ int pam_sm_chauthtok(pam_handle_t *pamh, int flags,
   int argc, const char **argv)
 {
   int result = PAM_AUTHTOK_ERR;
-  pam_api_context_t ctx;
+  pam_api_context_t *ctx = NULL;
   cfg_t *cfg = NULL;
   log_t *log = NULL;
   const char *old_password;
@@ -560,8 +500,8 @@ int pam_sm_chauthtok(pam_handle_t *pamh, int flags,
   if (PAM_SUCCESS != result)
     goto err;
 
-  cfg = &ctx.cfg;
-  log = ctx.log;
+  cfg = ctx->cfg;
+  log = ctx->log;
 
   // System wants us to verify that we are able to do a password update.
   // We have no external dependencies, so this is always true.
@@ -608,20 +548,20 @@ int pam_sm_chauthtok(pam_handle_t *pamh, int flags,
 
     log_trace(log, "Using authentication file %s", cfg->auth_file);
 
-    if (ctx.open_authfile_as_user) {
+    if (ctx->open_authfile_as_user) {
       log_trace(log, "Dropping privileges");
-      if (pam_modutil_drop_priv(ctx.pamh, &privs, ctx.pass)) {
-        log_error(log, "Unable to switch user to uid %i", ctx.pass->pw_uid);
+      if (pam_modutil_drop_priv(ctx->pamh, &privs, ctx->pass)) {
+        log_error(log, "Unable to switch user to uid %i", ctx->pass->pw_uid);
         result = PAM_SYSTEM_ERR;
         goto err;
       }
-      log_trace(log, "Switched to uid %i", ctx.pass->pw_uid);
+      log_trace(log, "Switched to uid %i", ctx->pass->pw_uid);
     }
 
-    result = update_encrypted_passwords(&ctx, old_password, new_password);
+    result = update_encrypted_passwords(ctx, old_password, new_password);
 
-    if (ctx.open_authfile_as_user) {
-      if (pam_modutil_regain_priv(ctx.pamh, &privs)) {
+    if (ctx->open_authfile_as_user) {
+      if (pam_modutil_regain_priv(ctx->pamh, &privs)) {
         log_error(log, "could not restore privileges");
         result = PAM_SYSTEM_ERR;
         goto err;
@@ -636,7 +576,7 @@ int pam_sm_chauthtok(pam_handle_t *pamh, int flags,
   result = PAM_SUCCESS;
 
 err:
-  cleanup_pam_api_context(&ctx);
+  free_pam_api_context(ctx);
   return result;
 }
 
