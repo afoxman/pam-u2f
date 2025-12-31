@@ -13,7 +13,7 @@
 
 #define debug_dbg(cfg, ...) log_trace(cfg->log, __VA_ARGS__)
 
-FILE *debug_open(const char *filename);
+FILE *debug_open(const char *);
 void debug_close(FILE *f);
 
 #endif /* DEBUG_H */

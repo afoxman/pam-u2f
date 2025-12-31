@@ -33,10 +33,6 @@
 
 #include "openbsd-compat.h"
 
-#define HMAC_SALT_SIZE 32
-#define HMAC_SECRET_SIZE 32
-#define AES_256_CBC_INIT_VECTOR_SIZE 16
-
 #ifndef FIDO_ERR_UV_BLOCKED /* XXX: compat libfido2 <1.5.0 */
 #define FIDO_ERR_UV_BLOCKED 0x3c
 #endif
@@ -146,7 +142,6 @@ static fido_cred_t *prepare_cred(const log_t *log,
   }
 
   log_trace(log, "Setting user to %s", user);
-
   if (log_get_minimum_level(log) <= log_level_trace) {
     char userid_str[sizeof(userid) * 2 + 1];
     for (size_t i = 0; i < sizeof(userid); i++)
@@ -382,7 +377,7 @@ static int print_authfile_line(const log_t *log,
     printf("%s", user);
   }
 
-  printf(":%s,%s,%s,%s%s%s,%s\n", args->resident ? "*" : b64_kh, b64_pk,
+  printf(":%s,%s,%s,%s%s%s,%s", args->resident ? "*" : b64_kh, b64_pk,
          cose_string(fido_cred_type(cred)),
          !args->no_user_presence ? "+presence" : "",
          args->user_verification ? "+verification" : "",
@@ -476,7 +471,7 @@ static void parse_args(int argc, char *argv[], struct args *args) {
 "  -P, --no-user-presence   Allow the credential to be used without ensuring the\n"
 "                             user's presence\n"
 "  -N, --pin-verification   Require PIN verification during authentication\n"
-"  -V, --user-verification  Require user verification during authentication.\n"
+"  -V, --user-verification  Require user verification during authentication\n"
 "  -d, --debug              Print debug information\n"
 "  -v, --verbose            Print information about chosen origin and appid\n"
 "  -u, --username=STRING    The name of the user registering the FIDO\n"
@@ -489,7 +484,7 @@ static void parse_args(int argc, char *argv[], struct args *args) {
 "\n"
 "Report bugs at <" PACKAGE_BUGREPORT ">.\n";
   /* clang-format on */
-  while ((c = getopt_long(argc, argv, "ho:i:t:rPNV:dvu:np", options, NULL)) !=
+  while ((c = getopt_long(argc, argv, "ho:i:t:rPNVdvu:np", options, NULL)) !=
          -1) {
     switch (c) {
       case 'h':

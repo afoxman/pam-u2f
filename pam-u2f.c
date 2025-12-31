@@ -27,7 +27,6 @@
 #include "util.h"
 
 #define free_const(a) free((void *) (uintptr_t) (a))
-#define LOG_PREFIX "debug(pam_u2f)"
 
 /* If secure_getenv is not defined, define it here */
 #ifndef HAVE_SECURE_GETENV
@@ -47,9 +46,9 @@ static void interactive_prompt(pam_handle_t *pamh, const cfg_t *cfg) {
   free(tmp);
 }
 
-static char *resolve_authfile_path(const log_t *log, const cfg_t *cfg, 
-                                   const struct passwd *user,
+static char *resolve_authfile_path(const cfg_t *cfg, const struct passwd *user,
                                    int *openasuser) {
+  log_t *log = cfg->log;
   char *authfile = NULL;
   const char *dir = NULL;
   const char *path = NULL;
@@ -92,7 +91,7 @@ typedef struct pam_api_context {
   int argc;
   const char **argv;
 
-  cfg_t *cfg;
+  cfg_t cfg;
   char *buffer_origin;
   char *buffer_appid;
   char *buffer_auth_file;
@@ -121,7 +120,7 @@ static void free_pam_api_context(pam_api_context_t *ctx)
     free(ctx->buffer_auth_file);
     free(ctx->buffer_appid);
     free(ctx->buffer_origin);
-    cfg_free(ctx->cfg);
+    cfg_free(&ctx->cfg);
     free(ctx);
   }
 }
@@ -147,7 +146,7 @@ static bool init_pam_api_context(const char *api_name, pam_handle_t *pamh,
   if (result != PAM_SUCCESS)
     goto err;
 
-  cfg = ctx->cfg;
+  cfg = &ctx->cfg;
   log = ctx->log;
 
   if (!cfg->origin) {
@@ -253,7 +252,7 @@ static bool init_pam_api_context(const char *api_name, pam_handle_t *pamh,
 
   // Resolve default or relative paths.
   if (!cfg->auth_file || cfg->auth_file[0] != '/') {
-    char *tmp = resolve_authfile_path(log, cfg, ctx->pass, 
+    char *tmp = resolve_authfile_path(cfg, ctx->pass, 
       &ctx->open_authfile_as_user);
     if (tmp == NULL) {
       log_error(log, "Could not resolve authfile path");
@@ -291,7 +290,7 @@ int pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc,
   if (PAM_SUCCESS != retval)
     goto done;
 
-  cfg = ctx->cfg;
+  cfg = &ctx->cfg;
   log = ctx->log;
 
   log_trace(log, "Using authentication file %s", cfg->auth_file);
@@ -394,7 +393,7 @@ static int update_encrypted_passwords(pam_api_context_t *ctx,
   const char *old_password, const char *new_password) 
 {
   int result = PAM_AUTH_ERR;
-  cfg_t *cfg = ctx->cfg;
+  cfg_t *cfg = &ctx->cfg;
   log_t *log = ctx->log;
   char **encrypted_passwords = NULL;
   size_t encrypted_passwords_len = 0;
@@ -500,7 +499,7 @@ int pam_sm_chauthtok(pam_handle_t *pamh, int flags,
   if (PAM_SUCCESS != result)
     goto err;
 
-  cfg = ctx->cfg;
+  cfg = &ctx->cfg;
   log = ctx->log;
 
   // System wants us to verify that we are able to do a password update.
