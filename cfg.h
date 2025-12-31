@@ -33,10 +33,8 @@ typedef struct {
   const char *appid;
   const char *prompt;
   const char *cue_prompt;
-  const char *debug_file;
-
+  FILE *debug_file;
   char *defaults_buffer;
-  FILE *log_file;
   log_t *log;
 } cfg_t;
 

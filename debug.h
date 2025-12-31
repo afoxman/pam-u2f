@@ -5,9 +5,11 @@
 #ifndef DEBUG_H
 #define DEBUG_H
 
-#include <stddef.h>
+#include <stdio.h>
 
 #include "log.h"
+
+#define DEFAULT_DEBUG_FILE stderr
 
 #define debug_dbg(cfg, ...) log_trace(cfg->log, __VA_ARGS__)
 

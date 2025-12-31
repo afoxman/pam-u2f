@@ -194,8 +194,9 @@ static void test_regular(void) {
   assert(str_opt_cmp(cfg->appid, cfg_defaults->appid));
   assert(str_opt_cmp(cfg->prompt, cfg_defaults->prompt));
   assert(str_opt_cmp(cfg->cue_prompt, cfg_defaults->cue_prompt));
-  assert(str_opt_cmp(cfg->debug_file, cfg_defaults->debug_file));
 
+  assert(cfg->debug_file != cfg_defaults->debug_file);
+  
   cfg_free(cfg_defaults);
   cfg_free(cfg);
 }

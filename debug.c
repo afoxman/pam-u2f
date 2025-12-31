@@ -12,15 +12,11 @@
 
 #include "debug.h"
 
-#define DEBUG_FMT "debug(pam_u2f): %s:%d (%s): %s%s"
-
 FILE *debug_open(const char *filename) {
   struct stat st;
   FILE *file;
   int fd;
 
-  if (!filename)
-    return stderr;
   if (strcmp(filename, "stdout") == 0)
     return stdout;
   if (strcmp(filename, "stderr") == 0)
@@ -44,7 +40,7 @@ err:
   if (fd != -1)
     close(fd);
 
-  return stderr; /* fallback to default */
+  return DEFAULT_DEBUG_FILE; /* fallback to default */
 }
 
 void debug_close(FILE *f) {

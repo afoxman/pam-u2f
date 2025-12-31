@@ -19,8 +19,10 @@
 static void cfg_load_arg_debug(cfg_t *cfg, const char *arg) {
   if (strcmp(arg, "debug") == 0)
     cfg->debug = 1;
-  else if (strncmp(arg, "debug_file=", strlen("debug_file=")) == 0)
-    cfg->debug_file = arg + strlen("debug_file=");
+  else if (strncmp(arg, "debug_file=", strlen("debug_file=")) == 0) {
+    debug_close(cfg->debug_file);
+    cfg->debug_file = debug_open(arg + strlen("debug_file="));    
+  }
 }
 
 static void cfg_load_arg(cfg_t *cfg, const char *arg) {
@@ -237,6 +239,7 @@ exit:
 }
 
 static void cfg_reset(cfg_t *cfg) {
+  cfg->debug_file = DEFAULT_DEBUG_FILE;
   cfg->userpresence = -1;
   cfg->userverification = -1;
   cfg->pinverification = -1;
@@ -267,44 +270,43 @@ int cfg_init(cfg_t **cfg_ptr, int flags, int argc, const char **argv,
   for (i = 0; i < argc; i++)
     cfg_load_arg(cfg, argv[i]);
 
-  cfg->log_file = debug_open(cfg->debug_file);
-  bool is_terminal = cfg->log_file == stdout || cfg->log_file == stderr;
   // When PAM_SILENT is set, we aren't allowed to log to the terminal.
+  bool is_terminal = cfg->debug_file == stdout || cfg->debug_file == stderr;
   if (0 == (flags & PAM_SILENT) || !is_terminal) {
     log_level_t min_level = cfg->debug ? log_level_trace : log_level_info;
-    cfg->log = cfg->log_file ? 
-      log_create_using_file(min_level, log_prefix, cfg->log_file) :
+    cfg->log = cfg->debug_file ?
+      log_create_using_file(min_level, log_prefix, cfg->debug_file) :
       log_create_using_syslog(min_level, log_prefix, LOG_AUTHPRIV);
   }
 
 exit:
-  debug_dbg(cfg, "called.");
-  debug_dbg(cfg, "flags %d argc %d", flags, argc);
-  for (i = 0; i < argc; i++) {
-    debug_dbg(cfg, "argv[%d]=%s", i, argv[i]);
+  if (cfg->debug) {
+    debug_dbg(cfg, "called.");
+    debug_dbg(cfg, "flags %d argc %d", flags, argc);
+    for (i = 0; i < argc; i++) {
+      debug_dbg(cfg, "argv[%d]=%s", i, argv[i]);
+    }
+    debug_dbg(cfg, "max_devices=%d", cfg->max_devs);
+    debug_dbg(cfg, "debug=%d", cfg->debug);
+    debug_dbg(cfg, "interactive=%d", cfg->interactive);
+    debug_dbg(cfg, "cue=%d", cfg->cue);
+    debug_dbg(cfg, "nodetect=%d", cfg->nodetect);
+    debug_dbg(cfg, "userpresence=%d", cfg->userpresence);
+    debug_dbg(cfg, "userverification=%d", cfg->userverification);
+    debug_dbg(cfg, "pinverification=%d", cfg->pinverification);
+    debug_dbg(cfg, "manual=%d", cfg->manual);
+    debug_dbg(cfg, "nouserok=%d", cfg->nouserok);
+    debug_dbg(cfg, "openasuser=%d", cfg->openasuser);
+    debug_dbg(cfg, "alwaysok=%d", cfg->alwaysok);
+    debug_dbg(cfg, "sshformat=%d", cfg->sshformat);
+    debug_dbg(cfg, "expand=%d", cfg->expand);
+    debug_dbg(cfg, "authfile=%s", cfg->auth_file ? cfg->auth_file : "(null)");
+    debug_dbg(cfg, "authpending_file=%s",
+              cfg->authpending_file ? cfg->authpending_file : "(null)");
+    debug_dbg(cfg, "origin=%s", cfg->origin ? cfg->origin : "(null)");
+    debug_dbg(cfg, "appid=%s", cfg->appid ? cfg->appid : "(null)");
+    debug_dbg(cfg, "prompt=%s", cfg->prompt ? cfg->prompt : "(null)");
   }
-  debug_dbg(cfg, "max_devices=%d", cfg->max_devs);
-  debug_dbg(cfg, "debug=%d", cfg->debug);
-  debug_dbg(cfg, "interactive=%d", cfg->interactive);
-  debug_dbg(cfg, "cue=%d", cfg->cue);
-  debug_dbg(cfg, "nodetect=%d", cfg->nodetect);
-  debug_dbg(cfg, "userpresence=%d", cfg->userpresence);
-  debug_dbg(cfg, "userverification=%d", cfg->userverification);
-  debug_dbg(cfg, "pinverification=%d", cfg->pinverification);
-  debug_dbg(cfg, "manual=%d", cfg->manual);
-  debug_dbg(cfg, "nouserok=%d", cfg->nouserok);
-  debug_dbg(cfg, "openasuser=%d", cfg->openasuser);
-  debug_dbg(cfg, "alwaysok=%d", cfg->alwaysok);
-  debug_dbg(cfg, "sshformat=%d", cfg->sshformat);
-  debug_dbg(cfg, "expand=%d", cfg->expand);
-  debug_dbg(cfg, "authfile=%s", cfg->auth_file ? cfg->auth_file : "(null)");
-  debug_dbg(cfg, "authpending_file=%s",
-            cfg->authpending_file ? cfg->authpending_file : "(null)");
-  debug_dbg(cfg, "origin=%s", cfg->origin ? cfg->origin : "(null)");
-  debug_dbg(cfg, "appid=%s", cfg->appid ? cfg->appid : "(null)");
-  debug_dbg(cfg, "prompt=%s", cfg->prompt ? cfg->prompt : "(null)");
-  debug_dbg(cfg, "cue_prompt=%s", cfg->cue_prompt ? cfg->cue_prompt : "(null)");
-  debug_dbg(cfg, "debug_file=%s", cfg->debug_file ? cfg->debug_file : "(null)");
 
   if (r != PAM_SUCCESS)
     cfg_free(cfg);
@@ -317,7 +319,8 @@ exit:
 void cfg_free(cfg_t *cfg) {
   if (cfg) {
     free(cfg->defaults_buffer);
-    debug_close(cfg->log_file);
+    debug_close(cfg->debug_file);
+    log_destroy(&cfg->log);
     free(cfg);
   }
 }
