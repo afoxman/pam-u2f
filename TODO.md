@@ -1,15 +1,20 @@
 
 # TODOs for crypto work
 
-## pick apart util.c/util.h into real files
+## figure out a PR strategy. isolate and test (as much as possible) to make the PRs separate and clean
 
-the parts you've majorly changed need to be refactored into their own files. you can then drop them in as separate PRs making them easier to accept and understand.
+look at the sum total of all changes. figure out how you want to stage the PRs. make a list in here, and include file/code references. 
+
+- is the PR small enough to be accepted?
+- is the code as isolated as possible?
+- does it have tests?
+- did you add tests for changes to existing code?
+
+NOTE: logging has some #error tags to size of new code. existing debug_dbg -> log_xxxxx should stay as is. adds significant value.
 
 ## add password-update flow (this is new for the pam module)
 
 use update_encrypted_password(...)
-
-## write tests for crypto code
 
 ## verify "no password" scenarios for chauthtok
 

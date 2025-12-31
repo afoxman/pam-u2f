@@ -305,7 +305,7 @@ int pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc,
     log_trace(log, "Switched to uid %i", ctx->pass->pw_uid);
   }
 
-  retval = get_devices_from_authfile(log, cfg, ctx->user, 
+  retval = get_devices_from_authfile(cfg, ctx->user, 
     ctx->devices, &ctx->devices_len);
 
   if (ctx->open_authfile_as_user) {
@@ -362,10 +362,10 @@ int pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc,
     if (cfg->interactive) {
       interactive_prompt(pamh, cfg);
     }
-    retval = do_authentication(log, cfg, ctx->user, ctx->devices, 
-      ctx->devices_len, pamh);
+    retval = do_authentication(cfg, ctx->user, ctx->devices, ctx->devices_len, 
+      pamh);
   } else {
-    retval = do_manual_authentication(log, cfg, ctx->devices, ctx->devices_len, 
+    retval = do_manual_authentication(cfg, ctx->devices, ctx->devices_len, 
       pamh);
   }
 
@@ -401,7 +401,7 @@ static int update_encrypted_passwords(pam_api_context_t *ctx,
   size_t cred_id_len;
   bool dirty = false;
 
-  result = get_devices_from_authfile(log, cfg, ctx->user, ctx->devices,
+  result = get_devices_from_authfile(cfg, ctx->user, ctx->devices,
     &ctx->devices_len);
   if (PAM_SUCCESS != result)
     goto err;

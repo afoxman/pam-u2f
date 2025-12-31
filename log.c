@@ -21,6 +21,10 @@ struct log {
   const char *prefix;
 };
 
+#error reduce_churn: collapse these 3 routines away
+#error reduce_churn: (a) use explicit values for all 4 levels so it is clear they are 1..4 and < and > work.
+#error reduce_churn: (b) make a level_info struct w/string name and syslog level. then define 5 entries (1 per level), 1 per source line.
+
 static bool is_log_level_valid(log_level_t level) {
   switch (level) {
     case log_level_trace:
@@ -62,6 +66,8 @@ static int get_log_level_as_syslog_level(log_level_t level) {
       return LOG_INFO;
   }
 }
+
+#error reduce_churn: kill alloc/free. use calloc for zeroing. move free into destroy.
 
 static log_t* log_alloc(void) {
   log_t *log = malloc(sizeof(log_t));
@@ -110,6 +116,8 @@ log_t *log_create_using_syslog(log_level_t minimum_level, const char *prefix, in
 
   return log;
 }
+
+#error align with existing patterns: **log -> *log.
 
 void log_destroy(log_t **plog) {
   log_free(plog);
