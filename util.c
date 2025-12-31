@@ -216,10 +216,11 @@ fail:
   return 0;
 }
 
-static int parse_native_format(const log_t *log, const cfg_t *cfg, 
-                               const char *username, FILE *opwfile, 
-                               device_t *devices, unsigned *n_devs) {
+static int parse_native_format(const cfg_t *cfg, const char *username, 
+                               FILE *opwfile, device_t *devices, 
+                               unsigned *n_devs) {
 
+  const log_t *log = cfg->log;
   const char *s_user;
   char *buf = NULL, *s_credential;
   size_t bufsiz = 0;
@@ -686,10 +687,10 @@ out:
   return r;
 }
 
-int get_devices_from_authfile(const log_t *log, const cfg_t *cfg, 
-                              const char *username, device_t *devices, 
-                              unsigned *n_devs) {
+int get_devices_from_authfile(const cfg_t *cfg, const char *username, 
+                              device_t *devices, unsigned *n_devs) {
 
+  const log_t *log = cfg->log;
   int r = PAM_AUTHINFO_UNAVAIL;
   int fd = -1;
   struct stat st;
@@ -775,7 +776,7 @@ int get_devices_from_authfile(const log_t *log, const cfg_t *cfg,
   }
 
   if (cfg->sshformat == 0) {
-    if (parse_native_format(log, cfg, username, opwfile, devices, n_devs) != 1) {
+    if (parse_native_format(cfg, username, opwfile, devices, n_devs) != 1) {
       goto err;
     }
   } else {
@@ -819,10 +820,10 @@ void free_devices(device_t *devices, const unsigned n_devs) {
   free(devices);
 }
 
-static int get_authenticators(const log_t *log, const cfg_t *cfg, 
-                              const fido_dev_info_t *devlist, size_t devlist_len,
-                              fido_assert_t *assert, const int rk,
-                              fido_dev_t **authlist) {
+static int get_authenticators(const cfg_t *cfg, const fido_dev_info_t *devlist, 
+                              size_t devlist_len, fido_assert_t *assert,
+                              const int rk, fido_dev_t **authlist) {
+  const log_t *log = cfg->log;
   const fido_dev_info_t *di = NULL;
   fido_dev_t *dev = NULL;
   int r;
@@ -1109,8 +1110,8 @@ const char *cose_string(int type) {
   }
 }
 
-static int parse_pk(const log_t *log, int old, const char *type, 
-                    const char *pk, struct pk *out) {
+static int parse_pk(const log_t *log, int old, const char *type, const char *pk,
+                    struct pk *out) {
   unsigned char *buf = NULL;
   size_t buf_len;
   int ok = 0;
@@ -1180,9 +1181,10 @@ err:
   return ok;
 }
 
-int do_authentication(const log_t *log, const cfg_t *cfg, const char *user,
+int do_authentication(const cfg_t *cfg, const char *user, 
                       const device_t *devices, const unsigned n_devs, 
                       pam_handle_t *pamh) {
+  const log_t *log = cfg->log;
   fido_assert_t *assert = NULL;
   fido_dev_info_t *devlist = NULL;
   fido_dev_t **authlist = NULL;
@@ -1249,7 +1251,7 @@ int do_authentication(const log_t *log, const cfg_t *cfg, const char *user,
       goto out;
     }
 
-    if (get_authenticators(log, cfg, devlist, ndevs, assert,
+    if (get_authenticators(cfg, devlist, ndevs, assert,
                            is_resident(devices[i].keyHandle), authlist)) {
       for (size_t j = 0; authlist[j] != NULL; j++) {
         /* options used during authentication */
@@ -1469,9 +1471,9 @@ err:
   return ok;
 }
 
-int do_manual_authentication(const log_t *log, const cfg_t *cfg, 
-                             const device_t *devices, const unsigned n_devs, 
-                             pam_handle_t *pamh) {
+int do_manual_authentication(const cfg_t *cfg, const device_t *devices, 
+                             const unsigned n_devs, pam_handle_t *pamh) {
+  const log_t *log = cfg->log;
   fido_assert_t *assert[n_devs];
   struct pk pk[n_devs];
   char *b64_challenge = NULL;
