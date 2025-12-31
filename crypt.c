@@ -958,6 +958,7 @@ bool update_encrypted_password(
   bytes_t old_ehs = BYTESINIT(NULL, 0);
   aes_256_gcm_key_t old_pkey;
   bytes_t hs = BYTESINIT(NULL, 0);
+  unsigned char hmac_salt[HMAC_SALT_LENGTH];
 
   if (!old_password) {
     log_error(log, "Old password is required to update the encrypted password");
@@ -973,8 +974,9 @@ bool update_encrypted_password(
   CALL(decrypt_aes_256_gcm(log, &old_ehsp.cp, &old_pkey, old_ehs, &hs));
 
   // Re-create the encrypted password. Use new cryptographic parameters.
+  CALL_OSSL(RAND_bytes(hmac_salt, sizeof(hmac_salt)));
   CALL(encrypt_password(log, username, credential_id_ptr, credential_id_len,
-    hs.ptr, hs.len, new_password, new_encrypted_password));
+    hmac_salt, hs.ptr, hs.len, new_password, new_encrypted_password));
 
   result = true;
 

@@ -234,13 +234,20 @@ exit:
   return r;
 }
 
+static void cfg_reset(cfg_t *cfg) {
+  memset(cfg, 0, sizeof(cfg_t));
+  cfg->userpresence = -1;
+  cfg->userverification = -1;
+  cfg->pinverification = -1;
+}
+
 int cfg_init(cfg_t *cfg, int flags, int argc, const char **argv) {
   int i, r;
   const char *config_path = NULL;
 
   (void) flags; /* prevent unused warning when unit-testing. */
 
-  cfg_free(cfg);
+  cfg_reset(cfg);
 
   for (i = 0; i < argc; i++) {
     if (strncmp(argv[i], "conf=", strlen("conf=")) == 0)
@@ -265,10 +272,7 @@ exit:
 
 void cfg_free(cfg_t *cfg) {
   free(cfg->defaults_buffer);
-  memset(cfg, 0, sizeof(cfg_t));
-  cfg->userpresence = -1;
-  cfg->userverification = -1;
-  cfg->pinverification = -1;
+  cfg_reset(cfg);
 }
 
 void cfg_log(const log_t *log, const cfg_t *cfg) {

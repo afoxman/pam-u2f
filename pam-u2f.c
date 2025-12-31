@@ -93,15 +93,15 @@ static FILE *open_log_file(const char *filename, bool *is_console_file) {
   *is_console_file = false;
 
   if (!filename) {
-    is_console_file = true;
+    *is_console_file = true;
     return stderr;
   }
   if (strcmp(filename, "stdout") == 0) {
-    is_console_file = true;
+    *is_console_file = true;
     return stdout;
   }
   if (strcmp(filename, "stderr") == 0) {
-    is_console_file = true;
+    *is_console_file = true;
     return stderr;
   }
   if (strcmp(filename, "syslog") == 0)
@@ -136,7 +136,7 @@ typedef struct pam_api_context {
   pam_handle_t *pamh;
   int flags;
   int argc;
-  char **argv;
+  const char **argv;
 
   cfg_t cfg;
   char *buffer_origin;
@@ -148,16 +148,17 @@ typedef struct pam_api_context {
   log_t *log;
 
   device_t *devices;
-  size_t devices_len;
+  unsigned int devices_len;
 
   const char *user;
   struct passwd *pass;
-  char *buffer_pass;
+  struct passwd buffer_pass;
+  char *buffer_pass_strings;
 
   int open_authfile_as_user;
 } pam_api_context_t;
 
-bool init_pam_api_context(const char *api_name, pam_handle_t *pamh, 
+static bool init_pam_api_context(const char *api_name, pam_handle_t *pamh, 
   int flags, int argc, const char **argv, pam_api_context_t *ctx)
 {
   int result = PAM_ABORT;
@@ -165,7 +166,6 @@ bool init_pam_api_context(const char *api_name, pam_handle_t *pamh,
   bool log_is_using_console = false;
   log_level_t minimum_level;
   log_t *log = NULL;
-  struct passwd *pw_s;
 
   memset(ctx, 0, sizeof(*ctx));
   ctx->pamh = pamh;
@@ -267,14 +267,14 @@ bool init_pam_api_context(const char *api_name, pam_handle_t *pamh,
 
   log_trace(log, "Requesting authentication for user %s", ctx->user);
 
-  if (!(ctx->buffer_pass = malloc(BUFSIZE))) {
+  if (!(ctx->buffer_pass_strings = malloc(BUFSIZE))) {
     log_error(log, "Unable to allocate memory");
     result = PAM_BUF_ERR;
     goto err;
   }
 
-  result = getpwnam_r(ctx->user, &pw_s, ctx->buffer_pass, BUFSIZE, 
-    &ctx->pass);
+  result = getpwnam_r(ctx->user, &ctx->buffer_pass, ctx->buffer_pass_strings, 
+    BUFSIZE, &ctx->pass);
   if (result != 0 || ctx->pass == NULL || ctx->pass->pw_dir == NULL ||
       ctx->pass->pw_dir[0] != '/') {
     log_error(log,
@@ -319,12 +319,12 @@ err:
   return result;
 }
 
-void cleanup_pam_api_context(pam_api_context_t *ctx)
+static void cleanup_pam_api_context(pam_api_context_t *ctx)
 {
   if (ctx) {
-    free(ctx->buffer_pass);
+    free(ctx->buffer_pass_strings);
     free_devices(ctx->devices, ctx->devices_len);
-    log_destroy(ctx->log);
+    log_destroy(&ctx->log);
     close_log_file(ctx->log_file);
     free(ctx->buffer_authpending_file);
     free(ctx->buffer_auth_file);
@@ -439,7 +439,7 @@ int pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc,
   }
 
 done:
-  if (cfg->alwaysok && retval != PAM_SUCCESS) {
+  if (cfg && cfg->alwaysok && retval != PAM_SUCCESS) {
     log_trace(log, "alwaysok needed (otherwise return with %d)", retval);
     retval = PAM_SUCCESS;
   }
@@ -450,7 +450,7 @@ done:
   return retval;
 }
 
-int update_encrypted_passwords(pam_api_context_t *ctx, 
+static int update_encrypted_passwords(pam_api_context_t *ctx, 
   const char *old_password, const char *new_password) 
 {
   int result = PAM_AUTH_ERR;
@@ -487,7 +487,7 @@ int update_encrypted_passwords(pam_api_context_t *ctx,
     cred_id_ptr = NULL;
 
     if (!b64_decode(device->keyHandle, strlen(device->keyHandle), 
-        &cred_id_ptr, &cred_id_len)) {
+        (void**)&cred_id_ptr, &cred_id_len)) {
       result = PAM_AUTHINFO_UNAVAIL;
       goto err;
     }
@@ -502,7 +502,7 @@ int update_encrypted_passwords(pam_api_context_t *ctx,
 
   if (dirty) {
 
-#error here -- need to rework the file-reading code so it can be used for both reading and writing
+//#error here -- need to rework the file-reading code so it can be used for both reading and writing
 
     // scan the entire file
     //   find the last line for this user ==> this is the one we're going to replace 
@@ -592,14 +592,14 @@ int pam_sm_chauthtok(pam_handle_t *pamh, int flags,
       goto err;
     }
 
-    result = pam_get_item(pamh, PAM_OLDAUTHTOK, &old_password);
+    result = pam_get_item(pamh, PAM_OLDAUTHTOK, (const void**)&old_password);
     if (PAM_SUCCESS != result) {
       log_error(log, "pam_get_item(PAM_OLDAUTHTOK): %s (%d)", 
                 pam_strerror(pamh, result), result);
       goto err;
     }
 
-    result = pam_get_item(pamh, PAM_AUTHTOK, &new_password);
+    result = pam_get_item(pamh, PAM_AUTHTOK, (const void**)&new_password);
     if (PAM_SUCCESS != result) {
       log_error(log, "pam_get_item(PAM_AUTHTOK): %s (%d)", 
                 pam_strerror(pamh, result), result);
