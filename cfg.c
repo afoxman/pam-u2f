@@ -239,20 +239,17 @@ exit:
 }
 
 static void cfg_reset(cfg_t *cfg) {
+  memset(cfg, 0, sizeof(cfg_t));
   cfg->debug_file = DEFAULT_DEBUG_FILE;
   cfg->userpresence = -1;
   cfg->userverification = -1;
   cfg->pinverification = -1;
 }
 
-int cfg_init(cfg_t **cfg_ptr, int flags, int argc, const char **argv, 
+int cfg_init(cfg_t *cfg, int flags, int argc, const char **argv, 
     const char *log_prefix) {
   int i, r;
   const char *config_path = NULL;
-
-  cfg_t *cfg = calloc(1, sizeof(cfg_t));
-  if (!cfg)
-    return PAM_BUF_ERR;
 
   cfg_reset(cfg);
 
@@ -270,7 +267,7 @@ int cfg_init(cfg_t **cfg_ptr, int flags, int argc, const char **argv,
   for (i = 0; i < argc; i++)
     cfg_load_arg(cfg, argv[i]);
 
-  // When PAM_SILENT is set, we aren't allowed to log to the terminal.
+  // Create the log. If PAM_SILENT is set, we can't write to the terminal.
   bool is_terminal = cfg->debug_file == stdout || cfg->debug_file == stderr;
   if (0 == (flags & PAM_SILENT) || !is_terminal) {
     log_level_t min_level = cfg->debug ? log_level_trace : log_level_info;
@@ -310,17 +307,13 @@ exit:
 
   if (r != PAM_SUCCESS)
     cfg_free(cfg);
-  else
-    *cfg_ptr = cfg;
 
   return r;
 }
 
 void cfg_free(cfg_t *cfg) {
-  if (cfg) {
-    free(cfg->defaults_buffer);
-    debug_close(cfg->debug_file);
-    log_destroy(&cfg->log);
-    free(cfg);
-  }
+  log_destroy(&cfg->log);
+  debug_close(cfg->debug_file);
+  free(cfg->defaults_buffer);
+  cfg_reset(cfg);
 }

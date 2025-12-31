@@ -38,7 +38,7 @@ typedef struct {
   log_t *log;
 } cfg_t;
 
-int cfg_init(cfg_t **cfg_ptr, int flags, int argc, const char **argv, 
+int cfg_init(cfg_t *cfg, int flags, int argc, const char **argv, 
   const char *log_prefix);
 
 void cfg_free(cfg_t *cfg);
