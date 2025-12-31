@@ -236,21 +236,22 @@ exit:
   return r;
 }
 
-int cfg_init(cfg_t **cfg_ptr, int flags, int argc, const char **argv, 
-    const char *log_prefix) {
-  int r, i;
-  const char *config_path = NULL;
-  cfg_t *cfg = NULL;
-
-  *cfg_ptr = NULL;
-
-  cfg = calloc(1, sizeof(cfg_t));
-  if (!cfg)
-    return PAM_BUF_ERR;
-
+static void cfg_reset(cfg_t *cfg) {
   cfg->userpresence = -1;
   cfg->userverification = -1;
   cfg->pinverification = -1;
+}
+
+int cfg_init(cfg_t **cfg_ptr, int flags, int argc, const char **argv, 
+    const char *log_prefix) {
+  int i, r;
+  const char *config_path = NULL;
+
+  cfg_t *cfg = calloc(1, sizeof(cfg_t));
+  if (!cfg)
+    return PAM_BUF_ERR;
+
+  cfg_reset(cfg);
 
   for (i = 0; i < argc; i++) {
     if (strncmp(argv[i], "conf=", strlen("conf=")) == 0)
