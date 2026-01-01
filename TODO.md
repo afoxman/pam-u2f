@@ -1,21 +1,9 @@
 
 # TODOs for crypto work
 
-## figure out a PR strategy. isolate and test (as much as possible) to make the PRs separate and clean
+## PR #1 [READY]: Logging -- new code, add log_t* to cfg_t, debug_dbg -> log_xxxxx
 
-look at the sum total of all changes. figure out how you want to stage the PRs. make a list in here, and include file/code references. 
-
-- is the PR small enough to be accepted?
-- is the code as isolated as possible?
-- does it have tests?
-- did you add tests for changes to existing code?
-
-NOTE: logging has some #error tags to size of new code. existing debug_dbg -> log_xxxxx should stay as is. adds significant value.
-
-### 1. Logging -- new code, add log_t* to cfg_t, debug_dbg -> log_xxxxx
-
--- split this into 2 PRs? 1 to introduce logging code and hook up debug_dbg, and another to transform debug_dbg->log_xxxxx
-    I've seen them split up PRs that way before. they might prefer it.
+Consider splitting this into 2 PRs. Introduce the logging code and tests in one PR. Then integrate into the codebase and cfg_t structure in the 2nd PR.
 
 * .gitignore
 * cfg.c
@@ -39,9 +27,7 @@ NOTE: logging has some #error tags to size of new code. existing debug_dbg -> lo
 * util.c (most of it)
 * util.h (most of it)
 
-TODO: more test cases needed? one per log type to both file and syslog, and cases for logging when log=NULL
-
-### 2. Crypto -- encrypt and decrypt password (NOT change-password)
+## PR #2 [IN_PROGRESS]: Crypto -- encrypt and decrypt password (NOT change-password)
 
 * b64.c
 * b64.h
