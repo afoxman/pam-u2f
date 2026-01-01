@@ -440,25 +440,7 @@ static int update_encrypted_passwords(pam_api_context_t *ctx,
   }
 
   if (dirty) {
-
-#error here -- need to rework the file-reading code so it can be used for both reading and writing
-
-    // scan the entire file
-    //   find the last line for this user ==> this is the one we're going to replace 
-    //   (note the file positions at the start (first char) and end (pos of \n + 1) of this line)
-    //
-    // create a new temp file next to the one we are renaming -- .tmpXXXXX
-    //   write(read(up-to-start-pos))
-    //
-    //   write the replacement line
-    //
-    //      user:devices[0]:devices[1]:...:devices[n]
-    //         device[i] (old_format)  = keyHandle,publicKey
-    //                   (!old_format) = keyHandle,publicKey,coseType,attributes,encryptedPassword
-    //
-    //   write(read(from-end-pos-to-EOF))
-    //   on error, delete .tmpXXXXX
-    //   on success, move .tmpXXXXX overtop of authfile (atomic replace)
+    // TODO: update authfile with new encrypted password(s)
   }
 
   result = PAM_SUCCESS;

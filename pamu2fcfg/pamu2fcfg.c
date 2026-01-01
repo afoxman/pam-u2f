@@ -565,7 +565,7 @@ int main(int argc, char *argv[]) {
   parse_args(argc, argv, &args);
   fido_init(args.debug ? FIDO_DEBUG : 0);
 
-  log = log_create_using_file(
+  log = log_create_file(
     args.debug || args.verbose ? log_level_trace : log_level_info, NULL, stderr);
 
   devlist = fido_dev_info_new(DEVLIST_LEN);
@@ -740,6 +740,6 @@ err:
   fido_assert_free(&assert);
   fido_cred_free(&cred);
   fido_dev_free(&dev);
-  log_destroy(&log);
+  log_free(log);
   exit(exit_code);
 }

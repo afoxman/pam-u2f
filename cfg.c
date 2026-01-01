@@ -272,8 +272,8 @@ int cfg_init(cfg_t *cfg, int flags, int argc, const char **argv,
   if (0 == (flags & PAM_SILENT) || !is_terminal) {
     log_level_t min_level = cfg->debug ? log_level_trace : log_level_info;
     cfg->log = cfg->debug_file ?
-      log_create_using_file(min_level, log_prefix, cfg->debug_file) :
-      log_create_using_syslog(min_level, log_prefix, LOG_AUTHPRIV);
+      log_create_file(min_level, log_prefix, cfg->debug_file) :
+      log_create_syslog(min_level, log_prefix, LOG_AUTHPRIV);
   }
 
 exit:
@@ -312,7 +312,7 @@ exit:
 }
 
 void cfg_free(cfg_t *cfg) {
-  log_destroy(&cfg->log);
+  log_free(cfg->log);
   debug_close(cfg->debug_file);
   free(cfg->defaults_buffer);
   cfg_reset(cfg);

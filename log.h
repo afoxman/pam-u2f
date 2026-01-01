@@ -37,45 +37,38 @@ typedef enum log_output_type {
 } log_output_type_t;
 
 typedef enum log_level {
-  log_level_none,
-  log_level_trace,
-  log_level_info,
-  log_level_warn,
-  log_level_error
+  log_level_none = 0,
+  log_level_trace = 1,
+  log_level_info = 2,
+  log_level_warn = 3,
+  log_level_error = 4
 } log_level_t;
 
 typedef struct log log_t;
 
-log_t *log_create_using_file(
-  log_level_t minimum_level, const char *prefix, FILE *file);
-log_t *log_create_using_syslog(
-  log_level_t minimum_level, const char *prefix, int facility);
-
-void log_destroy(log_t **plog);
+log_t *log_create_file(log_level_t min, const char *prefix, FILE *file);
+log_t *log_create_syslog(log_level_t min, const char *prefix, int facility);
+void log_free(log_t *log);
 
 log_output_type_t log_get_output_type(const log_t *log);
 log_level_t log_get_minimum_level(const log_t *log);
 
-void log_message(
-  const log_t *log, log_level_t level, 
-  const char *format, ...)
+void log_message(const log_t *log, log_level_t level, const char *fmt, ...)
   ATTRIBUTE_FORMAT(printf, 3, 4);
 
-void log_message_with_context(
-  const log_t *log, log_level_t level, 
-  const char *filename, int line, const char *function, 
-  const char *format, ...)
+void log_message_ctx(const log_t *log, log_level_t level, const char *file, 
+  int line, const char *func, const char *fmt, ...)
   ATTRIBUTE_FORMAT(printf, 6, 7);
 
 #ifdef LOG_INCLUDE_CONTEXT
 
-#define log_trace(log, ...) log_message_with_context(log, log_level_trace, \
+#define log_trace(log, ...) log_message_ctx(log, log_level_trace, \
   __FILE__, __LINE__, __func__, __VA_ARGS__)
-#define log_info(log, ...)  log_message_with_context(log, log_level_info, \
+#define log_info(log, ...)  log_message_ctx(log, log_level_info, \
   __FILE__, __LINE__, __func__, __VA_ARGS__)
-#define log_warn(log, ...)  log_message_with_context(log, log_level_warn, \
+#define log_warn(log, ...)  log_message_ctx(log, log_level_warn, \
   __FILE__, __LINE__, __func__, __VA_ARGS__)
-#define log_error(log, ...) log_message_with_context(log, log_level_error, \
+#define log_error(log, ...) log_message_ctx(log, log_level_error, \
   __FILE__, __LINE__, __func__, __VA_ARGS__)
 
 #else // !LOG_INCLUDE_CONTEXT

@@ -1,5 +1,25 @@
 /*
- * Copyright (C) 2025 Yubico AB - See COPYING
+ * Copyright 2025 Adam Foxman
+ *
+ * MIT License
+ * 
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the “Software”),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense, 
+ * and/or sell copies of the Software, and to permit persons to whom the 
+ * Software is furnished to do so, subject to the following conditions:
+ * 
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ * 
+ * THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR 
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, 
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING 
+ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+ * DEALINGS IN THE SOFTWARE.
  */
 
 #include <stdarg.h>
@@ -11,6 +31,19 @@
 
 #define LOG_MESSAGE_MAX 2000
 
+typedef struct {
+  const char *name;
+  const int syslog_priority;
+} log_level_info_t;
+
+static const log_level_info_t level_info[log_level_error + 1] = {
+  { .name = NULL, .syslog_priority = 0 },
+  { .name = "TRACE", .syslog_priority = LOG_DEBUG },
+  { .name = "INFO", .syslog_priority = LOG_INFO },
+  { .name = "WARNING", .syslog_priority = LOG_WARNING },
+  { .name = "ERROR", .syslog_priority = LOG_ERR }
+};
+
 struct log {
   log_output_type_t output_type;
   FILE *file;
@@ -21,118 +54,47 @@ struct log {
   const char *prefix;
 };
 
-#error reduce_churn: collapse these 3 routines away
-#error reduce_churn: (a) use explicit values for all 4 levels so it is clear they are 1..4 and < and > work.
-#error reduce_churn: (b) make a level_info struct w/string name and syslog level. then define 5 entries (1 per level), 1 per source line.
-
-static bool is_log_level_valid(log_level_t level) {
-  switch (level) {
-    case log_level_trace:
-    case log_level_info:
-    case log_level_warn:
-    case log_level_error:
-      return true;
-    default:
-      return false;
-  }
-}
-
-static const char *get_log_level_name(log_level_t level) {
-  switch (level) {
-    case log_level_error:
-      return "ERROR";
-    case log_level_warn:
-      return "WARNING";
-    case log_level_info:
-      return "INFO";
-    case log_level_trace:
-      return "TRACE";
-    default:
-      return NULL;
-  }
-}
-
-static int get_log_level_as_syslog_level(log_level_t level) {
-  switch (level) {
-    case log_level_trace:
-      return LOG_DEBUG;
-    case log_level_info:
-      return LOG_INFO;
-    case log_level_warn:
-      return LOG_WARNING;
-    case log_level_error:
-      return LOG_ERR;
-    default:
-      return LOG_INFO;
-  }
-}
-
-#error reduce_churn: kill alloc/free. use calloc for zeroing. move free into destroy.
-
-static log_t* log_alloc(void) {
-  log_t *log = malloc(sizeof(log_t));
-  if (log)
-    memset(log, 0, sizeof(*log));
-  return log;
-}
-
-static void log_free(log_t **plog) {
-  log_t *log = *plog;
-  if (log) {
-    free((char*)log->prefix);
-    free(log);
-    *plog = NULL;
-  }
-}
-
-log_t *log_create_using_file(log_level_t minimum_level, const char *prefix, FILE *file) {
-  if (!is_log_level_valid(minimum_level))
-    return NULL;
-  if (!file)
+log_t *log_create_file(log_level_t min, const char *prefix, FILE *file) {
+  if (min < log_level_trace || min > log_level_error || !file)
     return NULL;
 
-  log_t *log = log_alloc();
+  log_t *log = calloc(1, sizeof(log_t));
   if (log) {
     log->output_type = log_output_type_file;
     log->file = file;
-    log->minimum_level = minimum_level;
+    log->minimum_level = min;
     log->prefix = prefix ? strdup(prefix) : NULL;
   }
-
   return log;
 }
 
-log_t *log_create_using_syslog(log_level_t minimum_level, const char *prefix, int facility) {
-  if (!is_log_level_valid(minimum_level))
+log_t *log_create_syslog(log_level_t min, const char *prefix, int facility) {
+  if (min < log_level_trace || min > log_level_error)
     return NULL;
 
-  log_t *log = log_alloc();
+  log_t *log = calloc(1, sizeof(log_t));
   if (log) {
     log->output_type = log_output_type_syslog;
     log->syslog_facility = facility & LOG_FACMASK;
-    log->minimum_level = minimum_level;
+    log->minimum_level = min;
     log->prefix = prefix ? strdup(prefix) : NULL;
   }
-
   return log;
 }
 
-#error align with existing patterns: **log -> *log.
-
-void log_destroy(log_t **plog) {
-  log_free(plog);
+void log_free(log_t *log) {
+  if (log) {
+    free((char*)log->prefix);
+    free(log);
+  }
 }
 
 log_output_type_t log_get_output_type(const log_t *log) {
-  if (!log)
-    return log_output_type_none;
-  return log->output_type;
+  return log ? log->output_type : log_output_type_none;
 }
 
 log_level_t log_get_minimum_level(const log_t *log) {
-  if (!log)
-    return log_level_none;
-  return log->minimum_level;
+  return log ? log->minimum_level : log_level_none;
 }
 
 static char *copy(char *ptr, const char *end, const char *s) {
@@ -142,76 +104,67 @@ static char *copy(char *ptr, const char *end, const char *s) {
     if (len + 1 > avail)
       len = avail - 1;
 
-    memcpy(ptr, s, len);
-    ptr += len;
+    ptr = (char*)memcpy(ptr, s, len) + len;
     *ptr = '\0';
   }
   return ptr;
 }
 
-static void format_log_message(
-    char *ptr, const char *end,
-    const char *level, 
-    const char *prefix,
-    const char *filename, int line, const char *function,
-    const char *format, va_list ap) {
-
+static void format(char *ptr, size_t len, const char *level, 
+  const char *prefix, const char *file, int line, const char *func,
+  const char *fmt, va_list ap) 
+{
+  char *end = ptr + len;
   if (level) {
     ptr = copy(ptr, end, level);
     ptr = copy(ptr, end, ": ");
   }
-
   if (prefix) {
     ptr = copy(ptr, end, prefix);
     ptr = copy(ptr, end, ": ");
   }
-
-  if (filename && function) {
+  if (file && func) {
     const char *last_slash;
-    if ((last_slash = strrchr(filename, '/')) != NULL)
-      filename = last_slash + 1;
-
-    snprintf(ptr, end - ptr, "%s:%d (%s): ", filename, line, function);
+    if ((last_slash = strrchr(file, '/')) != NULL)
+      file = last_slash + 1;
+    snprintf(ptr, end - ptr, "%s:%d (%s): ", file, line, func);
     while (ptr < end && '\0' != *ptr)
       ptr++;
   }
-
   if (ptr < end)
-    vsnprintf(ptr, end - ptr, format, ap);
+    vsnprintf(ptr, end - ptr, fmt, ap);
 }
 
-static void log_message_internal(
-    const log_t *log, log_level_t level,
-    const char *filename, int line, const char *function,
-    const char *format, va_list ap) {
-  if (log && level >= log->minimum_level) {
-    char message[LOG_MESSAGE_MAX];
-    char *end = message + sizeof(message);
+static void log_write(const log_t *log, log_level_t level, const char *file, 
+  int line, const char *func, const char *fmt, va_list ap)
+{
+  if (log && level >= log->minimum_level && level <= log_level_error) {
+    const log_level_info_t *info = &level_info[level];
+    char msg[LOG_MESSAGE_MAX];
     if (log_output_type_file == log->output_type) {
-      format_log_message(message, end, get_log_level_name(level), log->prefix, filename, line, function, format, ap);
-      fprintf(log->file, "%s\n", message);
+      format(msg, sizeof(msg), info->name, log->prefix, file, line, func, fmt, ap);
+      fputs(msg, log->file);
+      fputc('\n', log->file);
     } else if (log_output_type_syslog == log->output_type) {
-      format_log_message(message, end, NULL, log->prefix, filename, line, function, format, ap);
-      syslog(log->syslog_facility | get_log_level_as_syslog_level(level), "%s", message);
+      format(msg, sizeof(msg), NULL, log->prefix, file, line, func, fmt, ap);
+      syslog(log->syslog_facility | info->syslog_priority, "%s", msg);
     }
   }
 }
 
-void log_message(
-    const log_t *log, log_level_t level, 
-    const char *format, ...) {
+void log_message(const log_t *log, log_level_t level, const char *fmt, ...) 
+{
   va_list ap;
-  va_start(ap, format);
-  log_message_internal(log, level, NULL, 0, NULL, format, ap);
+  va_start(ap, fmt);
+  log_write(log, level, NULL, 0, NULL, fmt, ap);
   va_end(ap);
 }
 
-void log_message_with_context(
-    const log_t *log, log_level_t level, 
-    const char *filename, int line, const char *function, 
-    const char *format, ...) {
+void log_message_ctx(const log_t *log, log_level_t level, const char *file, 
+  int line, const char *func, const char *fmt, ...)
+{
   va_list ap;
-  va_start(ap, format);
-  log_message_internal(log, level, filename, line, function, format, ap);
+  va_start(ap, fmt);
+  log_write(log, level, file, line, func, fmt, ap);
   va_end(ap);
 }
