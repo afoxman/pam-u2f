@@ -22,6 +22,7 @@
 
 #include "debug.h"
 #include "drop_privs.h"
+#include "log.h"
 #include "util.h"
 
 #define free_const(a) free((void *) (uintptr_t) (a))
@@ -64,9 +65,9 @@ static char *resolve_authfile_path(const cfg_t *cfg, const struct passwd *user,
       *openasuser = 0; /* documented exception, require explicit openasuser */
       path = cfg->sshformat ? DEFAULT_AUTHFILE_SSH : DEFAULT_AUTHFILE;
       if (!cfg->openasuser) {
-        debug_dbg(cfg, "WARNING: not dropping privileges when reading the "
-                       "authentication file, please consider setting "
-                       "openasuser=1 in the module configuration");
+        log_warn(cfg->log, "not dropping privileges when reading the "
+                           "authentication file, please consider setting "
+                           "openasuser=1 in the module configuration");
       }
     }
   } else {
@@ -101,9 +102,11 @@ int pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc,
   int should_free_auth_file = 0;
   int should_free_authpending_file = 0;
 
-  retval = cfg_init(cfg, flags, argc, argv);
+  retval = cfg_init(cfg, flags, argc, argv, __func__);
   if (retval != PAM_SUCCESS)
     goto done;
+
+  log_t *log = cfg->log;
 
   PAM_MODUTIL_DEF_PRIVS(privs);
 
@@ -112,7 +115,7 @@ int pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc,
       strcpy(buffer, DEFAULT_ORIGIN_PREFIX);
       if (gethostname(buffer + strlen(DEFAULT_ORIGIN_PREFIX),
                       BUFSIZE - strlen(DEFAULT_ORIGIN_PREFIX)) == -1) {
-        debug_dbg(cfg, "Unable to get host name");
+        log_error(log, "Unable to get host name");
         retval = PAM_SYSTEM_ERR;
         goto done;
       }
@@ -122,7 +125,7 @@ int pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc,
     debug_dbg(cfg, "Origin not specified, using \"%s\"", buffer);
     cfg->origin = strdup(buffer);
     if (!cfg->origin) {
-      debug_dbg(cfg, "Unable to allocate memory");
+      log_error(log, "Unable to allocate memory");
       retval = PAM_BUF_ERR;
       goto done;
     } else {
@@ -135,7 +138,7 @@ int pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc,
               cfg->origin);
     cfg->appid = strdup(cfg->origin);
     if (!cfg->appid) {
-      debug_dbg(cfg, "Unable to allocate memory");
+      log_error(log, "Unable to allocate memory");
       retval = PAM_BUF_ERR;
       goto done;
     } else {
@@ -155,14 +158,14 @@ int pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc,
 
   devices = calloc(cfg->max_devs, sizeof(device_t));
   if (!devices) {
-    debug_dbg(cfg, "Unable to allocate memory");
+    log_error(log, "Unable to allocate memory");
     retval = PAM_BUF_ERR;
     goto done;
   }
 
   pgu_ret = pam_get_user(pamh, &user, NULL);
   if (pgu_ret != PAM_SUCCESS || user == NULL) {
-    debug_dbg(cfg, "Unable to get username from PAM");
+    log_error(log, "Unable to get username from PAM");
     retval = PAM_CONV_ERR;
     goto done;
   }
@@ -172,7 +175,7 @@ int pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc,
   gpn_ret = getpwnam_r(user, &pw_s, buffer, sizeof(buffer), &pw);
   if (gpn_ret != 0 || pw == NULL || pw->pw_dir == NULL ||
       pw->pw_dir[0] != '/') {
-    debug_dbg(cfg, "Unable to retrieve credentials for user %s, (%s)", user,
+    log_error(log, "Unable to retrieve credentials for user %s, (%s)", user,
               strerror(errno));
     retval = PAM_SYSTEM_ERR;
     goto done;
@@ -184,7 +187,7 @@ int pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc,
   // Perform variable expansion.
   if (cfg->expand && cfg->auth_file) {
     if ((cfg->auth_file = expand_variables(cfg->auth_file, user)) == NULL) {
-      debug_dbg(cfg, "Failed to perform variable expansion");
+      log_error(log, "Failed to perform variable expansion");
       retval = PAM_BUF_ERR;
       goto done;
     }
@@ -194,7 +197,7 @@ int pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc,
   if (!cfg->auth_file || cfg->auth_file[0] != '/') {
     char *tmp = resolve_authfile_path(cfg, pw, &openasuser);
     if (tmp == NULL) {
-      debug_dbg(cfg, "Could not resolve authfile path");
+      log_error(log, "Could not resolve authfile path");
       retval = PAM_BUF_ERR;
       goto done;
     }
@@ -213,7 +216,7 @@ int pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc,
   if (openasuser) {
     debug_dbg(cfg, "Dropping privileges");
     if (pam_modutil_drop_priv(pamh, &privs, pw)) {
-      debug_dbg(cfg, "Unable to switch user to uid %i", pw->pw_uid);
+      log_error(log, "Unable to switch user to uid %i", pw->pw_uid);
       retval = PAM_SYSTEM_ERR;
       goto done;
     }
@@ -223,7 +226,7 @@ int pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc,
 
   if (openasuser) {
     if (pam_modutil_regain_priv(pamh, &privs)) {
-      debug_dbg(cfg, "could not restore privileges");
+      log_error(log, "could not restore privileges");
       retval = PAM_SYSTEM_ERR;
       goto done;
     }
@@ -243,8 +246,8 @@ int pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc,
       cfg->authpending_file = strdup(buffer);
     }
     if (!cfg->authpending_file) {
-      debug_dbg(cfg, "Unable to allocate memory for the authpending_file, "
-                     "touch request notifications will not be emitted");
+      log_warn(log, "Unable to allocate memory for the authpending_file, "
+                    "touch request notifications will not be emitted");
     } else {
       should_free_authpending_file = 1;
     }
@@ -267,8 +270,8 @@ int pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc,
       open(cfg->authpending_file,
            O_RDONLY | O_CREAT | O_CLOEXEC | O_NOFOLLOW | O_NOCTTY, 0664);
     if (authpending_file_descriptor < 0) {
-      debug_dbg(cfg, "Unable to emit 'authentication started' notification: %s",
-                strerror(errno));
+      log_warn(log, "Unable to emit 'authentication started' notification: %s",
+               strerror(errno));
     }
   }
 
@@ -284,8 +287,8 @@ int pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc,
   // Close the authpending_file to indicate that we stop waiting for a touch
   if (authpending_file_descriptor >= 0) {
     if (close(authpending_file_descriptor) < 0) {
-      debug_dbg(cfg, "Unable to emit 'authentication stopped' notification: %s",
-                strerror(errno));
+      log_warn(log, "Unable to emit 'authentication stopped' notification: %s",
+               strerror(errno));
     }
   }
 

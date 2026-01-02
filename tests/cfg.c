@@ -161,14 +161,14 @@ static void test_regular(void) {
   argv[0] = cf.arg;
 
   // 1. Load the default
-  r = cfg_init(&cfg_defaults, 0, 1, argv);
+  r = cfg_init(&cfg_defaults, 0, 1, argv, NULL);
   assert(r == PAM_SUCCESS);
 
   // 2. Write the configuration file, changing every field.
   config_flip_all(&cf, &cfg_defaults);
 
   // 3. Load from the file
-  r = cfg_init(&cfg, 0, sizeof(argv) / sizeof(*argv), argv);
+  r = cfg_init(&cfg, 0, sizeof(argv) / sizeof(*argv), argv, NULL);
   assert(r == PAM_SUCCESS);
   conf_file_clear(&cf);
 
@@ -224,7 +224,7 @@ static void test_config_abspath(void) {
   assert(r == 0);
 
   argv[0] = cf.arg;
-  r = cfg_init(&cfg, 0, sizeof(argv) / sizeof(*argv), argv);
+  r = cfg_init(&cfg, 0, sizeof(argv) / sizeof(*argv), argv, NULL);
   assert(r == PAM_SERVICE_ERR);
   conf_file_clear(&cf);
 
@@ -238,7 +238,7 @@ static void test_config_abspath(void) {
   assert(r == 0);
 
   argv[0] = cf.arg;
-  r = cfg_init(&cfg, 0, sizeof(argv) / sizeof(*argv), argv);
+  r = cfg_init(&cfg, 0, sizeof(argv) / sizeof(*argv), argv, NULL);
   assert(r == PAM_SUCCESS);
 
   assert(strcmp(cfg.prompt, "hello") == 0);
@@ -266,14 +266,14 @@ static void test_last_config_wins(void) {
 
   argv[0] = cf_1.arg;
   argv[1] = cf_2.arg;
-  r = cfg_init(&cfg, 0, sizeof(argv) / sizeof(*argv), argv);
+  r = cfg_init(&cfg, 0, sizeof(argv) / sizeof(*argv), argv, NULL);
   assert(r == PAM_SUCCESS);
   assert(cfg.max_devs == 12);
   cfg_free(&cfg);
 
   argv[0] = cf_2.arg;
   argv[1] = cf_1.arg;
-  r = cfg_init(&cfg, 0, sizeof(argv) / sizeof(*argv), argv);
+  r = cfg_init(&cfg, 0, sizeof(argv) / sizeof(*argv), argv, NULL);
   assert(r == PAM_SUCCESS);
   assert(cfg.max_devs == 10);
   cfg_free(&cfg);
@@ -295,7 +295,7 @@ static void test_file_corner_cases(void) {
   argv[0] = cf.arg;
 
   // 1. Empty file -> Success
-  r = cfg_init(&cfg, 0, sizeof(argv) / sizeof(*argv), argv);
+  r = cfg_init(&cfg, 0, sizeof(argv) / sizeof(*argv), argv, NULL);
   assert(r == PAM_SUCCESS);
   cfg_free(&cfg);
 
@@ -306,7 +306,7 @@ static void test_file_corner_cases(void) {
   assert(!r);
   r = fflush(cf.out);
   assert(r == 0);
-  r = cfg_init(&cfg, 0, sizeof(argv) / sizeof(*argv), argv);
+  r = cfg_init(&cfg, 0, sizeof(argv) / sizeof(*argv), argv, NULL);
   assert(r == PAM_SUCCESS);
   cfg_free(&cfg);
 
@@ -315,12 +315,12 @@ static void test_file_corner_cases(void) {
   assert(!r);
   r = fflush(cf.out);
   assert(r == 0);
-  r = cfg_init(&cfg, 0, sizeof(argv) / sizeof(*argv), argv);
+  r = cfg_init(&cfg, 0, sizeof(argv) / sizeof(*argv), argv, NULL);
   assert(r == PAM_SERVICE_ERR);
 
   // 4. Missing file -> Failure
   argv[0] = "conf=/not/the/droids/you/are/looking/for";
-  r = cfg_init(&cfg, 0, sizeof(argv) / sizeof(*argv), argv);
+  r = cfg_init(&cfg, 0, sizeof(argv) / sizeof(*argv), argv, NULL);
   assert(r == PAM_SERVICE_ERR);
 
   conf_file_clear(&cf);
@@ -338,7 +338,7 @@ static void test_file_parser(void) {
   conf_file_init(&cf, NULL);
   argv[0] = cf.arg;
 
-  r = cfg_init(&cfg_defaults, 0, 1, argv);
+  r = cfg_init(&cfg_defaults, 0, 1, argv, NULL);
   assert(r == PAM_SUCCESS);
 
   // Defaults are unlikely to change, but if they do
@@ -368,7 +368,7 @@ static void test_file_parser(void) {
   fputs("authpending_file =else\n", cf.out);
   fflush(cf.out);
 
-  r = cfg_init(&cfg, 0, sizeof(argv) / sizeof(*argv), argv);
+  r = cfg_init(&cfg, 0, sizeof(argv) / sizeof(*argv), argv, NULL);
   assert(r == PAM_SUCCESS);
 
   assert(cfg.alwaysok);

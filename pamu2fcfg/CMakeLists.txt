@@ -7,6 +7,7 @@ add_executable(pamu2fcfg
 	../util.c
 	../b64.c
 	../explicit_bzero.c
+	../log.c
 )
 
 target_link_libraries(pamu2fcfg PRIVATE
