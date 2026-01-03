@@ -23,6 +23,13 @@
 #define DEFAULT_ORIGIN_PREFIX "pam://"
 #define SSH_ORIGIN "ssh:"
 
+typedef struct bytes {
+  unsigned char *ptr;
+  size_t len;
+} bytes_t;
+
+#define BYTESINIT(p,l)  { .ptr = p, .len = l }
+
 #define DEVLIST_LEN 64
 
 typedef struct {

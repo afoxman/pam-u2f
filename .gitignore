@@ -44,4 +44,5 @@ tests/cfg
 tests/dlsym_check
 tests/expand
 tests/get_devices
+tests/test_crypto
 tests/test_log

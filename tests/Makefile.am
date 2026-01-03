@@ -25,6 +25,10 @@ cfg_CFLAGS = -DPAM_U2F_TESTING -DSCONFDIR='"@SCONFDIR@"' $(AM_CFLAGS)
 check_PROGRAMS += test_log
 test_log_SOURCES = ./test_log.c ../log.c
 
+check_PROGRAMS += test_crypto
+test_crypto_SOURCES = ./test_crypto.c ../crypto.c
+test_crypto_LDADD = $(top_builddir)/libmodule.la
+
 TESTS = $(check_PROGRAMS)
 
 EXTRA_DIST = CMakeLists.txt

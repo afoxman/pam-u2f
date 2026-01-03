@@ -6,6 +6,7 @@ add_executable(pamu2fcfg
 	readpassphrase.c
 	../util.c
 	../b64.c
+	../crypto.c
 	../explicit_bzero.c
 	../log.c
 )
