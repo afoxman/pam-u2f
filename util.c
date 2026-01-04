@@ -1183,13 +1183,16 @@ err:
   return ok;
 }
 
-int do_authentication(const cfg_t *cfg, const device_t *devices,
-                      const unsigned n_devs, pam_handle_t *pamh) {
+int do_authentication(const cfg_t *cfg, const char *user,
+                      const device_t *devices, const unsigned n_devs,
+                      pam_handle_t *pamh) {
   const log_t *log = cfg->log;
   fido_assert_t *assert = NULL;
   fido_dev_info_t *devlist = NULL;
   fido_dev_t **authlist = NULL;
   int cued = 0;
+  bool has_ep = false;
+  unsigned char hmac_salt[HMAC_SALT_LENGTH];
   int r;
   int retval = PAM_AUTH_ERR;
   size_t ndevs = 0;
@@ -1274,6 +1277,29 @@ int do_authentication(const cfg_t *cfg, const device_t *devices,
           goto out;
         }
 
+        has_ep = 0 != strcmp(devices[i].encryptedPassword, "*");
+        if (has_ep) {
+          if (!get_hmac_salt_from_encrypted_password(log, 
+              devices[i].encryptedPassword, hmac_salt))
+            goto out;
+
+          r = fido_assert_set_extensions(assert, FIDO_EXT_HMAC_SECRET);
+          if (r != FIDO_OK) {
+            log_error(log, 
+                      "fido_assert_set_extensions(HMAC_SECRET): %s (%d)", 
+                      fido_strerr(r), r);
+            goto out;
+          }
+
+          r = fido_assert_set_hmac_salt(assert, hmac_salt, sizeof(hmac_salt));
+          if (r != FIDO_OK) {
+            log_error(log, 
+                      "fido_assert_set_hmac_salt: %s (%d)", 
+                      fido_strerr(r), r);
+            goto out;
+          }
+        }
+
         if (opts.pin == FIDO_OPT_TRUE) {
           pin = converse(pamh, PAM_PROMPT_ECHO_OFF, "Please enter the PIN: ");
           if (pin == NULL) {
@@ -1304,6 +1330,30 @@ int do_authentication(const cfg_t *cfg, const device_t *devices,
           }
           r = fido_assert_verify(assert, 0, pk.type, pk.ptr);
           if (r == FIDO_OK) {
+            if (has_ep) {
+              bytes_t cred_id = BYTESINIT(
+                (unsigned char *)fido_assert_id_ptr(assert, 0),
+                fido_assert_id_len(assert, 0));
+              bytes_t hmac_secret = BYTESINIT(
+                (unsigned char *)fido_assert_hmac_secret_ptr(assert, 0), 
+                fido_assert_hmac_secret_len(assert, 0));
+              char *password = NULL;
+              int retval_authtok = PAM_SUCCESS;
+
+              if (decrypt_password(log, user, cred_id, hmac_secret,
+                                   devices[i].encryptedPassword, &password)) {
+                retval_authtok = pam_set_item(pamh, PAM_AUTHTOK, password);
+                explicit_bzero(password, strlen(password));
+                free(password);
+              }
+              if (retval_authtok != PAM_SUCCESS) {
+                log_error(log, "pam_set_item(PAM_AUTHTOK): %s (%d)", 
+                  pam_strerror(pamh, r), r);
+                retval = retval_authtok;
+                goto out;
+              }
+            }
+
             retval = PAM_SUCCESS;
             goto out;
           }

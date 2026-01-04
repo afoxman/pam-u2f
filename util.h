@@ -50,8 +50,9 @@ fido_assert_t *prepare_assert(const log_t *log, const char* rp,
                               const unsigned char* kh, size_t kh_len,
                               fido_opt_t up, fido_opt_t uv);
 
-int do_authentication(const cfg_t *cfg, const device_t *devices,
-                      const unsigned n_devs, pam_handle_t *pamh);
+int do_authentication(const cfg_t *cfg, const char *user,
+                      const device_t *devices, const unsigned n_devs, 
+                      pam_handle_t *pamh);
 int do_manual_authentication(const cfg_t *cfg, const device_t *devices,
                              const unsigned n_devs, pam_handle_t *pamh);
 char *converse(pam_handle_t *pamh, int echocode, const char *prompt);
