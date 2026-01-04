@@ -746,6 +746,39 @@ static void test_new_credentials(const char *username) {
   /* clang-format on*/
 }
 
+static void test_encrypted_password(const char *username) {
+  cfg_t cfg;
+  device_t *dev;
+  unsigned n_devs;
+  int rc;
+
+  memset(&cfg, 0, sizeof(cfg_t));
+  cfg.debug = 1;
+  cfg.debug_file = stdout;
+  cfg.max_devs = 1;
+
+  dev = calloc(cfg.max_devs, sizeof(*dev));
+  assert(dev != NULL);
+  cfg.auth_file = "credentials/encrypted_password.cred";
+  rc = get_devices_from_authfile(&cfg, username, dev, &n_devs);
+  assert(rc == PAM_SUCCESS);
+  assert(n_devs == 1);
+  assert(strcmp(dev[0].keyHandle, "y+1EGTvKUM2aWnI5R+EFyBxWmKpVXouq9QDdnJdaLNbdA9q/zODgqIjchgR11CmDQrwiknrNSv02qkewaKZlqw==") == 0);
+  assert(strcmp(dev[0].publicKey, "aygPrAonXqOMe5H+wuB/lBxzIwRe25EDXR8rTGgrkZbPx+pLPm3aJNFNT/DmaN0+c97vn8QZF6S/3/5h6gmitA==") == 0);
+  assert(strcmp(dev[0].coseType, "es256") == 0);
+  assert(strcmp(dev[0].attributes, "+presence") == 0);
+  assert(strcmp(dev[0].encryptedPassword, "v=1|"
+    "hs=8FD28uE67TzzR0fuG7YDoKOld0qeWXbXa/Uc7jDuM2I=|"
+    "hi=rVmwg3GIIysJtbNy|ht=yVwG5kTQZz+rhQ1rzghAjA==|"
+    "ep=mhO1Y0I2d0w87m531sA=|ps=u2yS1ap0joQ6YeTs3TAyJDsPyaW96dmGF7csb53i2rw=|"
+    "pc=1000000|"
+    "pi=ATwbRC6BOWp6ErZf|"
+    "pt=3XjYWEuSim0Dxd7H+hjivw==|"
+    "eh=wLZLePO0zAA8a8cl2TzWWlROLbXkt8wkvsW6/ZoGDLE=") == 0);
+  assert(dev[0].old_format == 0);
+  free_devices(dev, n_devs);
+}
+
 int main(void) {
   const struct passwd *pwd;
   char *username;
@@ -758,6 +791,7 @@ int main(void) {
   test_old_credential(username);
   test_limited_count(username);
   test_new_credentials(username);
+  test_encrypted_password(username);
 
   free(username);
 }

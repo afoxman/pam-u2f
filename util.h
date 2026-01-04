@@ -5,6 +5,7 @@
 #ifndef UTIL_H
 #define UTIL_H
 
+#include <fido.h>
 #include <stdio.h>
 #include <security/pam_appl.h>
 
@@ -37,12 +38,17 @@ typedef struct {
   char *keyHandle;
   char *coseType;
   char *attributes;
+  char *encryptedPassword;
   int old_format;
 } device_t;
 
 int get_devices_from_authfile(const cfg_t *cfg, const char *username,
                               device_t *devices, unsigned *n_devs);
 void free_devices(device_t *devices, const unsigned n_devs);
+
+fido_assert_t *prepare_assert(const log_t *log, const char* rp,
+                              const unsigned char* kh, size_t kh_len,
+                              fido_opt_t up, fido_opt_t uv);
 
 int do_authentication(const cfg_t *cfg, const device_t *devices,
                       const unsigned n_devs, pam_handle_t *pamh);
