@@ -46,6 +46,10 @@ int get_devices_from_authfile(const cfg_t *cfg, const char *username,
                               device_t *devices, unsigned *n_devs);
 void free_devices(device_t *devices, const unsigned n_devs);
 
+int update_authfile_user(cfg_t *cfg, const char *user, device_t *devices,
+                         unsigned *n_devices, const char *old_password,
+                         const char *new_password);
+
 fido_assert_t *prepare_assert(const log_t *log, const char* rp,
                               const unsigned char* kh, size_t kh_len,
                               fido_opt_t up, fido_opt_t uv);

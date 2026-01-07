@@ -688,9 +688,8 @@ out:
   return r;
 }
 
-int get_devices_from_authfile(const cfg_t *cfg, const char *username,
-                              device_t *devices, unsigned *n_devs) {
-
+static int open_authfile(const cfg_t *cfg, const char *username, 
+                         FILE **fptr, size_t *fsize) {
   const log_t *log = cfg->log;
   int r = PAM_AUTHINFO_UNAVAIL;
   int fd = -1;
@@ -698,12 +697,7 @@ int get_devices_from_authfile(const cfg_t *cfg, const char *username,
   struct passwd *pw = NULL, pw_s;
   char buffer[BUFSIZE];
   int gpu_ret;
-  FILE *opwfile = NULL;
   size_t opwfile_size;
-  unsigned i;
-
-  /* Ensure we never return uninitialized count. */
-  *n_devs = 0;
 
   fd = open(cfg->auth_file, O_RDONLY | O_CLOEXEC | O_NOCTTY);
   if (fd < 0) {
@@ -768,13 +762,37 @@ int get_devices_from_authfile(const cfg_t *cfg, const char *username,
     goto err;
   }
 
-  opwfile = fdopen(fd, "r");
-  if (opwfile == NULL) {
+  *fptr = fdopen(fd, "r");
+  if (*fptr == NULL) {
     log_error(log, "fdopen: %s", strerror(errno));
     goto err;
   } else {
-    fd = -1; /* fd belongs to opwfile */
+    fd = -1; /* fd belongs to fptr */
   }
+  if (fsize)
+    *fsize = opwfile_size;
+  r = PAM_SUCCESS;
+
+err:
+  if (-1 != fd)
+    close(fd);
+  return r;
+}
+
+int get_devices_from_authfile(const cfg_t *cfg, const char *username,
+                              device_t *devices, unsigned *n_devs) {
+  const log_t *log = cfg->log;
+  int r = PAM_AUTHINFO_UNAVAIL;
+  FILE *opwfile = NULL;
+  size_t opwfile_size;
+  unsigned i;
+
+  /* Ensure we never return uninitialized count. */
+  *n_devs = 0;
+
+  r = open_authfile(cfg, username, &opwfile, &opwfile_size);
+  if (PAM_SUCCESS != r)
+    goto err;
 
   if (cfg->sshformat == 0) {
     if (parse_native_format(cfg, username, opwfile, devices, n_devs) != 1) {
@@ -801,9 +819,6 @@ err:
 
   if (opwfile)
     fclose(opwfile);
-
-  if (fd != -1)
-    close(fd);
 
   return r;
 }
@@ -882,6 +897,298 @@ static int get_authenticators(const cfg_t *cfg, const fido_dev_info_t *devlist,
     log_trace(log, "Key not found");
     return (0);
   }
+}
+
+static int scan_authfile(const log_t *log, FILE *f, const char *user,
+                         bool *found_user, size_t *start, size_t *length) {
+  int r = PAM_AUTHINFO_UNAVAIL;
+  size_t user_len = strlen(user);
+  ssize_t len;
+  char *buf = NULL;
+  size_t bufsiz = 0;
+  long pos;
+
+  *found_user = false;
+
+  log_trace(log, "Scanning authfile for user %s", user);
+
+  if (0 != fseek(f, 0, SEEK_SET)) {
+    log_error(log, "Failed to set authfile position to 0: %s (%d)",
+              strerror(errno), errno);
+    return false;
+  }
+
+  while ((len = getline(&buf, &bufsiz, f)) != -1) {
+    log_trace(log, "Read %zu bytes", len);
+
+    if (0 != strncmp(buf, user, user_len))
+      continue;
+    if (':' != buf[user_len])
+      continue;
+
+    if (-1 == (pos = ftell(f))) {
+      log_error(log, "Failed to read authfile position: %s (%d)",
+                strerror(errno), errno);
+      goto fail;
+    }
+
+    *found_user = true;
+    *start = (size_t)pos - len;
+    *length = len;
+    log_trace(log, "Found user %s: start=%zu, length=%zu", user, *start,
+              *length);
+  }
+  if (ferror(f)) {
+    log_error(log, "Failed to read authfile line: %s (%d)", strerror(errno),
+              errno);
+    goto fail;
+  }
+  if (!feof(f)) {
+    log_error(log, 
+              "getline exited without error or EOF when reading authfile");
+    goto fail;
+  }
+  r = PAM_SUCCESS;
+
+fail:
+  free(buf);
+  return r;
+}
+
+static int file_copy_range(log_t *log, FILE *in, size_t start, size_t length,
+                           FILE *out) {
+  unsigned char buffer[BUFSIZE];
+  size_t count = 0;
+
+  if (0 != fseek(in, (long)start, SEEK_SET)) {
+    log_error(log, "fseek failed: %s (%d)", strerror(errno), errno);
+    return false;
+  }
+
+  while (count < length) {
+    size_t n = length - count;
+    if (n > sizeof(buffer))
+      n = sizeof(buffer);
+    
+    size_t r = fread(buffer, 1, n, in);
+    if (r < n) {
+      log_error(log, 
+                "fread: got %zu bytes, expected %zu bytes (eof=%d, error=%d)",
+                r, n, feof(in), ferror(in));
+      return false;
+    }
+
+    size_t w = fwrite(buffer, 1, n, out);
+    if (w < n) {
+      log_error(log, 
+                "fwrite: got %zu bytes, expected %zu bytes (eof=%d, error=%d)",
+                w, n, feof(out), ferror(out));
+      return false;
+    }
+
+    count += n;
+  }
+
+  return true;
+}
+
+static int rewrite_authfile_user(cfg_t *cfg, FILE *af, const char *user,
+                                 device_t *devices, unsigned n_devices) {
+  log_t *log = cfg->log;
+  int retval = PAM_SERVICE_ERR;
+  bool found_user;
+  size_t user_data_start;
+  size_t user_data_len;
+  struct stat af_st;
+  char aftmp_path[BUFSIZE];
+  int aftmp_fd = -1;
+  FILE *aftmp = NULL;
+
+  log_trace(log, "Rewriting authfile, scoping changes to user %s", user);
+
+  retval = scan_authfile(log, af, user, &found_user, &user_data_start, 
+                         &user_data_len);
+  if (PAM_SUCCESS != retval)
+    goto err;
+  if (!found_user) {
+    log_error(log, "Cannot find device data for user %s in authfile", user);
+    retval = PAM_AUTHINFO_UNAVAIL;
+    goto err;
+  }
+
+  /* Query the mode of the current authfile. Use when creating the new one. */
+  if (fstat(fileno(af), &af_st) < 0) {
+    log_error(log, "fstat failed for authfile: %s (%d)", strerror(errno), 
+              errno);
+    goto err;
+  }
+
+  snprintf(aftmp_path, sizeof(aftmp_path), "%s.tmp", cfg->auth_file);
+  log_trace(log, "Creating new authfile: %s", aftmp_path);
+
+  (void) unlink(aftmp_path);
+  aftmp_fd = open(aftmp_path, 
+                  O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC | O_EXCL, 
+                  af_st.st_mode);
+  if (aftmp_fd < 0) {
+    log_error(log, "Failed to create new authfile %s: %s (%d)", aftmp_path, 
+              strerror(errno), errno);
+    retval = PAM_SERVICE_ERR;
+    goto err;
+  }
+  if (NULL == (aftmp = fdopen(aftmp_fd, "w"))) {
+    log_error(log, "fdopen failed on new authfile %s: %s (%d)", aftmp_path,
+              strerror(errno), errno);
+    retval = PAM_SERVICE_ERR;
+    goto err;
+  }
+  aftmp_fd = -1; // owned by FILE*, will be closed on fclose()
+
+  if (user_data_start > 0) {
+    log_trace(log, "Copying %zu bytes from the current authfile",
+              user_data_start);
+    if (!file_copy_range(log, af, 0, user_data_start, aftmp)) {
+      retval = PAM_SERVICE_ERR;
+      goto err;
+    }
+  }
+
+  log_trace(log, "Writing %d devices for user %s", n_devices, user);
+  if (fputs(user, aftmp) < 0) {
+    log_error(log, "Failed to write user name to new authfile: %s (%d)",
+              strerror(errno), errno);
+    retval = PAM_SERVICE_ERR;
+    goto err;
+  }
+  for (unsigned i = 0; i < n_devices; i++) {
+    device_t *dev = &devices[i];
+    int c = fprintf(aftmp, ":%s,%s,%s,%s,%s", dev->keyHandle,
+                    dev->publicKey, dev->coseType, dev->attributes,
+                    dev->encryptedPassword);
+    if (c < 0) {
+      log_error(log, 
+                "Failed to write device %d of %d to new authfile: %s (%d)",
+                i + 1, n_devices, strerror(errno), errno);
+      retval = PAM_SERVICE_ERR;
+      goto err;
+    }
+  }
+  if (fputs("\n", aftmp) < 0) {
+    log_error(log, "Failed to write LF to new authfile: %s (%d)",
+              strerror(errno), errno);
+    retval = PAM_SERVICE_ERR;
+    goto err;
+  }
+
+  if ((off_t)(user_data_start + user_data_len) < af_st.st_size) {
+    size_t start = user_data_start + user_data_len;
+    size_t len = af_st.st_size - start;
+    log_trace(log, "Copying %zu bytes from the current authfile", len);
+    if (!file_copy_range(log, af, start, len, aftmp)) {
+      retval = PAM_SERVICE_ERR;
+      goto err;
+    }
+  }
+
+  log_trace(log, "Renaming new authfile %s, replacing existing file %s", 
+            aftmp_path, cfg->auth_file);
+  if (0 != rename(aftmp_path, cfg->auth_file)) {
+    log_error(log, "Failed to rename new authfile %s to %s: %s (%d)",
+              aftmp_path, cfg->auth_file, strerror(errno), errno);
+    retval = PAM_SERVICE_ERR;
+    goto err;
+  }
+
+  retval = PAM_SUCCESS;
+
+err:
+  if (-1 != aftmp_fd)
+    close(aftmp_fd);
+  if (aftmp)
+    fclose(aftmp);
+  unlink(aftmp_path);
+
+  return retval;
+}
+
+int update_authfile_user(cfg_t *cfg, const char *user, device_t *devices,
+                         unsigned *n_devices, const char *old_password,
+                         const char *new_password) {
+  int retval = PAM_AUTH_ERR;
+  log_t *log = cfg->log;
+  FILE *af = NULL;
+  unsigned char *cred_id_ptr = NULL;
+  size_t cred_id_len;
+  bool dirty = false;
+
+  *n_devices = 0;
+
+  log_info(log, "Updating passwords in authfile %s", cfg->auth_file);
+
+  if (0 != cfg->sshformat) {
+    log_warn(log, "Skipping SSH-format authfile %s", cfg->auth_file);
+    retval = PAM_SUCCESS;
+    goto err;
+  }
+
+  retval = open_authfile(cfg, user, &af, NULL);
+  if (PAM_SUCCESS != retval)
+    goto err;
+
+  if (1 != parse_native_format(cfg, user, af, devices, n_devices)) {
+    retval = PAM_AUTHINFO_UNAVAIL;
+    goto err;
+  }
+
+  log_trace(log, "Found %d credential(s) for user %s", *n_devices, user);
+
+  for (size_t i = 0; i < *n_devices; i++) {
+    device_t *dev = &devices[i];
+    char *ep;
+    if (0 == strcmp(dev->encryptedPassword, "*"))
+      continue;
+
+    log_info(log, "Attempting to update the password in credential id %s",
+             dev->keyHandle);
+
+    free(cred_id_ptr);
+    cred_id_ptr = NULL;
+
+    if (!b64_decode(dev->keyHandle, (void**)&cred_id_ptr, &cred_id_len)) {
+      retval = PAM_AUTHINFO_UNAVAIL;
+      goto err;
+    }
+    bytes_t cred_id = BYTESINIT(cred_id_ptr, cred_id_len);
+
+    if (!update_encrypted_password(log, old_password, new_password, user,
+                                   cred_id, dev->encryptedPassword, &ep)) {
+      log_error(log, 
+                "Password update failed for credential id %s. Please "
+                "re-enroll using pamu2fcfg.",
+                dev->keyHandle);
+    } else {
+      log_info(log, "Password update succeeded for credential id %s",
+               dev->keyHandle);
+      free(dev->encryptedPassword);
+      dev->encryptedPassword = ep;
+      dirty = true;
+    }
+  }
+
+  if (dirty) {
+    retval = rewrite_authfile_user(cfg, af, user, devices, *n_devices);
+    if (PAM_SUCCESS != retval)
+      goto err;
+  }
+
+  retval = PAM_SUCCESS;
+
+err:
+  free(cred_id_ptr);
+  if (af)
+    fclose(af);
+
+  return retval;
 }
 
 static void init_opts(struct opts *opts) {

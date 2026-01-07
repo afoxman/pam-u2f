@@ -20,6 +20,8 @@
 #include <string.h>
 #include <errno.h>
 
+#include "b64.h"
+#include "crypto.h"
 #include "debug.h"
 #include "drop_privs.h"
 #include "log.h"
@@ -35,6 +37,21 @@ char *secure_getenv(const char *name) {
   return NULL;
 }
 #endif
+
+typedef int (*pam_handler)(pam_handle_t *pamh, int flags, cfg_t *cfg, 
+                           const char *user, struct passwd *pw, 
+                           device_t *devices, unsigned *n_devices, 
+                           bool openasuser);
+
+static int handle_auth(pam_handle_t *pamh, int flags, cfg_t *cfg,
+                       const char *user, struct passwd *pw, device_t *devices,
+                       unsigned *n_devices, bool openasuser);
+static int handle_chpw(pam_handle_t *pamh, int flags, cfg_t *cfg,
+                       const char *user, struct passwd *pw, device_t *devices,
+                       unsigned *n_devices, bool openasuser);
+
+static int do_pam_call(pam_handle_t *pamh, int flags, int argc,
+                       const char **argv, pam_handler handler);
 
 static void interactive_prompt(pam_handle_t *pamh, const cfg_t *cfg) {
   char *tmp = NULL;
@@ -86,6 +103,27 @@ static char *resolve_authfile_path(const cfg_t *cfg, const struct passwd *user,
 int pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc,
                         const char **argv) {
 
+  return do_pam_call(pamh, flags, argc, argv, handle_auth);
+}
+
+PAM_EXTERN int pam_sm_setcred(pam_handle_t *pamh, int flags, int argc,
+                              const char **argv) {
+  (void) pamh;
+  (void) flags;
+  (void) argc;
+  (void) argv;
+
+  return PAM_SUCCESS;
+}
+
+/* PAM entry point for password management */
+int pam_sm_chauthtok(pam_handle_t *pamh, int flags, int argc, 
+                     const char **argv) {
+  return do_pam_call(pamh, flags, argc, argv, handle_chpw);
+}
+
+static int do_pam_call(pam_handle_t *pamh, int flags, int argc,
+                       const char **argv, pam_handler handler) {
   struct passwd *pw = NULL, pw_s;
   const char *user = NULL;
 
@@ -100,15 +138,12 @@ int pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc,
   int should_free_origin = 0;
   int should_free_appid = 0;
   int should_free_auth_file = 0;
-  int should_free_authpending_file = 0;
 
   retval = cfg_init(cfg, flags, argc, argv, __func__);
   if (retval != PAM_SUCCESS)
     goto done;
 
   log_t *log = cfg->log;
-
-  PAM_MODUTIL_DEF_PRIVS(privs);
 
   if (!cfg->origin) {
     if (!cfg->sshformat) {
@@ -213,6 +248,45 @@ int pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc,
   if (!openasuser) {
     openasuser = geteuid() == 0 && cfg->openasuser;
   }
+
+  retval = handler(pamh, flags, cfg, user, pw, devices, &n_devices, openasuser);
+
+done:
+  free_devices(devices, n_devices);
+
+  if (should_free_origin) {
+    free_const(cfg->origin);
+    cfg->origin = NULL;
+  }
+
+  if (should_free_appid) {
+    free_const(cfg->appid);
+    cfg->appid = NULL;
+  }
+
+  if (should_free_auth_file) {
+    free_const(cfg->auth_file);
+    cfg->auth_file = NULL;
+  }
+
+  debug_dbg(cfg, "done. [%s]", pam_strerror(pamh, retval));
+
+  cfg_free(cfg);
+  return retval;
+}
+
+static int handle_auth(pam_handle_t *pamh, int flags, cfg_t *cfg,
+                       const char *user, struct passwd *pw, device_t *devices,
+                       unsigned *n_devices, bool openasuser) {
+  int retval = PAM_ABORT;
+  log_t *log = cfg->log;
+  char buffer[BUFSIZE];
+  int should_free_authpending_file = 0;
+
+  (void) flags; // not used
+
+  PAM_MODUTIL_DEF_PRIVS(privs);
+
   if (openasuser) {
     debug_dbg(cfg, "Dropping privileges");
     if (pam_modutil_drop_priv(pamh, &privs, pw)) {
@@ -222,7 +296,7 @@ int pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc,
     }
     debug_dbg(cfg, "Switched to uid %i", pw->pw_uid);
   }
-  retval = get_devices_from_authfile(cfg, user, devices, &n_devices);
+  retval = get_devices_from_authfile(cfg, user, devices, n_devices);
 
   if (openasuser) {
     if (pam_modutil_regain_priv(pamh, &privs)) {
@@ -279,9 +353,9 @@ int pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc,
     if (cfg->interactive) {
       interactive_prompt(pamh, cfg);
     }
-    retval = do_authentication(cfg, user, devices, n_devices, pamh);
+    retval = do_authentication(cfg, user, devices, *n_devices, pamh);
   } else {
-    retval = do_manual_authentication(cfg, devices, n_devices, pamh);
+    retval = do_manual_authentication(cfg, devices, *n_devices, pamh);
   }
 
   // Close the authpending_file to indicate that we stop waiting for a touch
@@ -293,23 +367,6 @@ int pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc,
   }
 
 done:
-  free_devices(devices, n_devices);
-
-  if (should_free_origin) {
-    free_const(cfg->origin);
-    cfg->origin = NULL;
-  }
-
-  if (should_free_appid) {
-    free_const(cfg->appid);
-    cfg->appid = NULL;
-  }
-
-  if (should_free_auth_file) {
-    free_const(cfg->auth_file);
-    cfg->auth_file = NULL;
-  }
-
   if (should_free_authpending_file) {
     free_const(cfg->authpending_file);
     cfg->authpending_file = NULL;
@@ -319,20 +376,83 @@ done:
     debug_dbg(cfg, "alwaysok needed (otherwise return with %d)", retval);
     retval = PAM_SUCCESS;
   }
-  debug_dbg(cfg, "done. [%s]", pam_strerror(pamh, retval));
-
-  cfg_free(cfg);
   return retval;
 }
 
-PAM_EXTERN int pam_sm_setcred(pam_handle_t *pamh, int flags, int argc,
-                              const char **argv) {
-  (void) pamh;
-  (void) flags;
-  (void) argc;
-  (void) argv;
+static int handle_chpw(pam_handle_t *pamh, int flags, cfg_t *cfg,
+                       const char *user, struct passwd *pw, device_t *devices,
+                       unsigned *n_devices, bool openasuser) {
+  int retval = PAM_ABORT;
+  log_t *log = cfg->log;
+  const char *old_password = NULL;
+  const char *new_password = NULL;
+  PAM_MODUTIL_DEF_PRIVS(privs);
 
-  return PAM_SUCCESS;
+  // System wants us to verify that we are able to do a password update.
+  // We have no external dependencies, so this is always true.
+  if (flags & PAM_PRELIM_CHECK) {
+    log_trace(log, "PAM_PRELIM_CHECK successful");
+    retval = PAM_SUCCESS;
+    goto done;
+  }
+
+  // System is requesting that we only update expired passwords. Our 
+  // passwords never expire, so there is no action to take.
+  if (flags & PAM_CHANGE_EXPIRED_AUTHTOK) {
+    log_trace(log, 
+              "Received PAM_CHANGE_EXPIRED_AUTHTOK. "
+              "U2F passwords do not expire. No changes were made.");
+    retval = PAM_SUCCESS;
+    goto done;
+  }
+
+  // At this point, the only remaining flag we should see is
+  // PAM_UPDATE_AUTHTOK.
+  if (0 == (flags & PAM_UPDATE_AUTHTOK)) {
+    log_error(log, "flags set to an unexpected value: 0x%08x", flags);
+    retval = PAM_SERVICE_ERR;
+    goto done;
+  }
+  log_trace(log, "Processing PAM_UPDATE_AUTHTOK");
+
+  retval = pam_get_item(pamh, PAM_OLDAUTHTOK, (const void**)&old_password);
+  if (PAM_SUCCESS != retval) {
+    log_error(log, "pam_get_item(PAM_OLDAUTHTOK): %s (%d)",
+              pam_strerror(pamh, retval), retval);
+    goto done;
+  }
+
+  retval = pam_get_item(pamh, PAM_AUTHTOK, (const void**)&new_password);
+  if (PAM_SUCCESS != retval) {
+    log_error(log, "pam_get_item(PAM_AUTHTOK): %s (%d)",
+              pam_strerror(pamh, retval), retval);
+    goto done;
+  }
+
+  if (openasuser) {
+    debug_dbg(cfg, "Dropping privileges");
+    if (pam_modutil_drop_priv(pamh, &privs, pw)) {
+      log_error(log, "Unable to switch user to uid %i", pw->pw_uid);
+      retval = PAM_SYSTEM_ERR;
+      goto done;
+    }
+    debug_dbg(cfg, "Switched to uid %i", pw->pw_uid);
+  }
+
+  retval = update_authfile_user(cfg, user, devices, n_devices, old_password,
+    new_password);
+
+  if (openasuser) {
+    if (pam_modutil_regain_priv(pamh, &privs)) {
+      log_error(log, "could not restore privileges");
+      retval = PAM_SYSTEM_ERR;
+      goto done;
+    }
+    debug_dbg(cfg, "Restored privileges");
+  }
+
+done:
+  return retval;
 }
 
 #ifdef PAM_MODULE_ENTRY

@@ -29,6 +29,10 @@ check_PROGRAMS += test_crypto
 test_crypto_SOURCES = ./test_crypto.c ../crypto.c
 test_crypto_LDADD = $(top_builddir)/libmodule.la
 
+check_PROGRAMS += test_authfile
+test_authfile_SOURCES = ./test_authfile.c ../util.c
+test_authfile_LDADD = $(top_builddir)/libmodule.la
+
 TESTS = $(check_PROGRAMS)
 
 EXTRA_DIST = CMakeLists.txt

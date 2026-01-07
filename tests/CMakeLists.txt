@@ -106,3 +106,10 @@ target_link_libraries(expand PRIVATE
 	pam_u2f_testing
 )
 add_test(NAME test_crypto COMMAND test_crypto)
+
+add_executable(test_authfile test_authfile.c)
+target_link_libraries(expand PRIVATE
+	common
+	pam_u2f_testing
+)
+add_test(NAME test_authfile COMMAND test_authfile)
