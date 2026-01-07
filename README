@@ -176,10 +176,11 @@ The obtained artifacts can be installed as follows:
 == Service Configuration
 
 Create a file for a new service in `/etc/pam.d/` or edit an already
-existing one by adding a line similar to this:
+existing one by adding lines similar to these:
 
 ----
 auth sufficient pam_u2f.so debug
+password required pam_u2f.so debug
 ----
 
 For more information about the syntax of PAM configuration files, please
@@ -363,7 +364,9 @@ else if you'd like to execute additional authentication modules after pam-u2f.
 
 ----
 auth sufficient pam_u2f.so authfile=/etc/u2f_mappings cue pinverification=1
-# Fallback modules go below this line (e.g. password authentication).
+# Fallback auth modules go below this line (e.g. password authentication).
+
+password required pam_u2f.so authfile=/etc/u2f_mappings
 ----
 
 ==== Passwordless Authentication using Biometrics
@@ -377,6 +380,8 @@ otherwise blocked.
 auth sufficient pam_u2f.so authfile=/etc/u2f_mappings cue pinverification=0 userverification=1
 auth sufficient pam_u2f.so authfile=/etc/u2f_mappings cue pinverification=1 userverification=0
 # More fallback modules go below this line (e.g. password authentication).
+
+password required pam_u2f.so authfile=/etc/u2f_mappings
 ----
 
 [[authMappingFiles]]
@@ -410,13 +415,14 @@ name, and the information obtained during the registration procedure.
 
 The mappings should look like this, one per line:
 
- <username1>:<KeyHandle1>,<UserKey1>,<CoseType1>,<Options1>:<KeyHandle2>,<UserKey2>,<CoseType2>,<Options2>:...
- <username2>:<KeyHandle1>,<UserKey1>,<CoseType1>,<Options1>:<KeyHandle2>,<UserKey2>,<CoseType2>,<Options2>:...
+ <username1>:<KeyHandle1>,<UserKey1>,<CoseType1>,<Options1>,<EncryptedPassword1>:<KeyHandle2>,<UserKey2>,<CoseType2>,<Options2>,<EncryptedPassword2>:...
+ <username2>:<KeyHandle1>,<UserKey1>,<CoseType1>,<Options1>,<EncryptedPassword1>:<KeyHandle2>,<UserKey2>,<CoseType2>,<Options2>,<EncryptedPassword2>:...
 
-Now add `authfile=/etc/u2f_mappings` to your PAM configuration line,
+Now add `authfile=/etc/u2f_mappings` to your PAM configuration lines,
 so it looks like:
 
  auth sufficient pam_u2f.so authfile=/etc/u2f_mappings
+ password required pam_u2f.so authfile=/etc/u2f_mappings
 
 If you do not set the `openasuser` setting, the authfile will be
 opened and parsed as `root` so make sure it has the correct owner and
@@ -434,7 +440,7 @@ not exhibiting the intended behaviour.
 
 The file must have only one line:
 
- <username>:<KeyHandle1>,<UserKey1>,<CoseType1>,<Options1>:<KeyHandle2>,<UserKey2>,<CoseType2>,<Options2>:...
+ <username>:<KeyHandle1>,<UserKey1>,<CoseType1>,<Options1>,<EncryptedPassword1>:<KeyHandle2>,<UserKey2>,<CoseType2>,<Options2>,<EncryptedPassword2>:...
 
 This is much the same concept as the SSH authorized_keys file.
 
@@ -447,19 +453,21 @@ be dropped by default. Consider also setting `openasuser` in that
 case.
 
 [[registration]]
-=== Obtaining Key Handles and Public Keys
+=== Obtaining Key Handles, Public Keys, and Encrypted Passwords
 
 In order to obtain the required information for the authentication procedure,
 a token should be first registered. This can be done by using the command line
 configuration tool provided with the module:
 
 ----
-$ pamu2fcfg -uusername -opam://myorigin -ipam://myappid
+$ pamu2fcfg -uusername -opam://myorigin -ipam://myappid -p
 ----
 
 the tool will register a connected token by using the specified origin
 and appid. If neither are specified they will default to
-`pam://$HOSTNAME`. Additionally, it is possible to set other options
+`pam://$HOSTNAME`. The tool prompts for a password, which is encrypted using
+the authenticator. On login, the password is used to unlock PAM modules like
+the GNOME keyring. Additionally, it is possible to set other options
 to require user presence (touch), PIN verification and resident
 credentials. On success the tool prints to standard output a
 configuration line that can be directly used with the module. For

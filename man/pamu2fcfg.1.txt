@@ -55,6 +55,10 @@ The name of the user registering the device. Defaults to the current user name.
 Print only registration information (key handle, public key, and options).
 Useful for appending.
 
+*-p*, *--password*::
+Store an encrypted password with the credential. The password will be attached
+to the PAM stack as an auth token. Useful for unlocking keyrings.
+
 == BUGS
 Report pamu2fcfg bugs in the issue tracker: https://github.com/Yubico/pam-u2f/issues
 

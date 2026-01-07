@@ -46,7 +46,7 @@ file may be configured relative to the users' home dirs, e.g.
 ".ssh/u2f_keys". If not specified, the location defaults to
 $XDG_CONFIG_HOME/Yubico/u2f_keys. If $XDG_CONFIG_HOME is not set,
 $HOME/.config/Yubico/u2f_keys is used. The authfile format is
-<username>:<KeyHandle1>,<UserKey1>,<CoseType1>,<Options1>:<KeyHandle2>,<UserKey2>,<CoseType2>,<Options2>:...
+<username>:<KeyHandle1>,<UserKey1>,<CoseType1>,<Options1>,<EncryptedPassword1>:<KeyHandle2>,<UserKey2>,<CoseType2>,<Options2>,<EncryptedPassword2>:...
 
 *expand*::
 Enables variable expansion within the authfile path: `%u` is expanded to the
@@ -151,12 +151,14 @@ authorization mapping file.
 Passwordless authentication enforcing PIN verification.
 
   auth sufficient pam_u2f.so authfile=/etc/u2f_mappings cue pinverification=1 userverification=0
+  password required pam_u2f.so authfile=/etc/u2f_mappings
 
 Passwordless authentication using built-in UV (e.g. biometrics) with a fallback
 to PIN.
 
   auth sufficient pam_u2f.so authfile=/etc/u2f_mappings cue pinverification=0 userverification=1
   auth sufficient pam_u2f.so authfile=/etc/u2f_mappings cue pinverification=1 userverification=0
+  password required pam_u2f.so authfile=/etc/u2f_mappings
 
 == CAVEATS
 By default, relative paths to the authfile will be opened as the
