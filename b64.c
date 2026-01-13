@@ -59,14 +59,14 @@ fail:
   return (ok);
 }
 
-int b64_decode(const char *in, void **ptr, size_t *len) {
+int b64_decode(const char *in, size_t in_len, void **ptr, size_t *len) {
   BIO *bio_mem = NULL;
   BIO *bio_b64 = NULL;
   size_t alloc_len;
   int n;
   int ok = 0;
 
-  if (in == NULL || ptr == NULL || len == NULL || strlen(in) > INT_MAX)
+  if (in == NULL || ptr == NULL || len == NULL || in_len > INT_MAX)
     return (0);
 
   *ptr = NULL;
@@ -76,14 +76,14 @@ int b64_decode(const char *in, void **ptr, size_t *len) {
   if (bio_b64 == NULL)
     goto fail;
 
-  bio_mem = BIO_new_mem_buf((const void *) in, -1);
+  bio_mem = BIO_new_mem_buf((const void *) in, (int) in_len);
   if (bio_mem == NULL)
     goto fail;
 
   BIO_set_flags(bio_b64, BIO_FLAGS_BASE64_NO_NL);
   BIO_push(bio_b64, bio_mem);
 
-  alloc_len = strlen(in);
+  alloc_len = in_len;
   *ptr = calloc(1, alloc_len);
   if (*ptr == NULL)
     goto fail;

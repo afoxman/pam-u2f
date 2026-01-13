@@ -92,3 +92,10 @@ target_link_libraries(cfg PRIVATE
 	pam_u2f_testing
 )
 add_test(NAME cfg COMMAND cfg)
+
+add_executable(test_log test_log.c)
+target_link_libraries(expand PRIVATE
+	common
+	pam_u2f_testing
+)
+add_test(NAME test_log COMMAND test_log)

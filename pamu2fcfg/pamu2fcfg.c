@@ -16,6 +16,7 @@
 
 #include <fido.h>
 
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -26,6 +27,8 @@
 #include <err.h>
 
 #include "b64.h"
+#include "crypt.h"
+#include "log.h"
 #include "util.h"
 
 #include "openbsd-compat.h"
@@ -46,9 +49,12 @@ struct args {
   int debug;
   int verbose;
   int nouser;
+  int password;
 };
 
-static fido_cred_t *prepare_cred(const struct args *const args) {
+static fido_cred_t *prepare_cred(const log_t *log, 
+                                 const struct args *const args,
+                                 fido_opt_t *uv) {
   fido_cred_t *cred = NULL;
   const char *appid = NULL;
   const char *user = NULL;
@@ -62,44 +68,46 @@ static fido_cred_t *prepare_cred(const struct args *const args) {
   int r;
 
   if ((cred = fido_cred_new()) == NULL) {
-    fprintf(stderr, "fido_cred_new failed\n");
+    log_error(log, "fido_cred_new failed");
     goto err;
   }
 
   type = COSE_ES256; /* default */
   if (args->type && !cose_type(args->type, &type)) {
-    fprintf(stderr, "Unknown COSE type '%s'.\n", args->type);
+    log_error(log, "Unknown COSE type '%s'.", args->type);
     goto err;
   }
 
+  log_trace(log, "Setting credential type to %s", cose_string(type));
+
   if ((r = fido_cred_set_type(cred, type)) != FIDO_OK) {
-    fprintf(stderr, "error: fido_cred_set_type (%d): %s\n", r, fido_strerr(r));
+    log_error(log, "fido_cred_set_type (%d): %s", r, fido_strerr(r));
     goto err;
   }
 
   if (!random_bytes(cdh, sizeof(cdh))) {
-    fprintf(stderr, "random_bytes failed\n");
+    log_error(log, "random_bytes failed");
     goto err;
   }
 
   if ((r = fido_cred_set_clientdata_hash(cred, cdh, sizeof(cdh))) != FIDO_OK) {
-    fprintf(stderr, "error: fido_cred_set_clientdata_hash (%d): %s\n", r,
-            fido_strerr(r));
+    log_error(log, "fido_cred_set_clientdata_hash (%d): %s", r, 
+              fido_strerr(r));
     goto err;
   }
 
   if (args->origin) {
     if (strlcpy(origin, args->origin, sizeof(origin)) >= sizeof(origin)) {
-      fprintf(stderr, "error: strlcpy failed\n");
+      log_error(log, "strlcpy failed");
       goto err;
     }
   } else {
     if ((n = strlcpy(origin, PAM_PREFIX, sizeof(origin))) >= sizeof(origin)) {
-      fprintf(stderr, "error: strlcpy failed\n");
+      log_error(log, "strlcpy failed");
       goto err;
     }
     if (gethostname(origin + n, sizeof(origin) - n) == -1) {
-      perror("gethostname");
+      log_error(log, "gethostname (%d): %s", errno, strerror(errno));
       goto err;
     }
   }
@@ -110,13 +118,11 @@ static fido_cred_t *prepare_cred(const struct args *const args) {
     appid = origin;
   }
 
-  if (args->verbose) {
-    fprintf(stderr, "Setting origin to %s\n", origin);
-    fprintf(stderr, "Setting appid to %s\n", appid);
-  }
+  log_trace(log, "Setting origin to %s", origin);
+  log_trace(log, "Setting appid to %s", appid);
 
   if ((r = fido_cred_set_rp(cred, origin, appid)) != FIDO_OK) {
-    fprintf(stderr, "error: fido_cred_set_rp (%d) %s\n", r, fido_strerr(r));
+    log_error(log, "fido_cred_set_rp (%d) %s", r, fido_strerr(r));
     goto err;
   }
 
@@ -131,32 +137,33 @@ static fido_cred_t *prepare_cred(const struct args *const args) {
   }
 
   if (!random_bytes(userid, sizeof(userid))) {
-    fprintf(stderr, "random_bytes failed\n");
+    log_error(log, "random_bytes failed");
     goto err;
   }
 
-  if (args->verbose) {
-    fprintf(stderr, "Setting user to %s\n", user);
-    fprintf(stderr, "Setting user id to ");
+  log_trace(log, "Setting user to %s", user);
+  if (log_get_minimum_level(log) <= log_level_trace) {
+    char userid_str[sizeof(userid) * 2 + 1];
     for (size_t i = 0; i < sizeof(userid); i++)
-      fprintf(stderr, "%02x", userid[i]);
-    fprintf(stderr, "\n");
+      sprintf(userid_str + (i*2), "%02x", userid[i]);
+    log_trace(log, "Setting user id to %s", userid_str);
   }
 
   if ((r = fido_cred_set_user(cred, userid, sizeof(userid), user, user,
                               NULL)) != FIDO_OK) {
-    fprintf(stderr, "error: fido_cred_set_user (%d) %s\n", r, fido_strerr(r));
+    log_error(log, "fido_cred_set_user (%d) %s", r, fido_strerr(r));
     goto err;
   }
 
   if ((r = fido_cred_set_rk(cred, args->resident ? FIDO_OPT_TRUE
                                                  : FIDO_OPT_OMIT)) != FIDO_OK) {
-    fprintf(stderr, "error: fido_cred_set_rk (%d) %s\n", r, fido_strerr(r));
+    log_error(log, "fido_cred_set_rk (%d) %s", r, fido_strerr(r));
     goto err;
   }
 
-  if ((r = fido_cred_set_uv(cred, FIDO_OPT_OMIT)) != FIDO_OK) {
-    fprintf(stderr, "error: fido_cred_set_uv (%d) %s\n", r, fido_strerr(r));
+  *uv = FIDO_OPT_OMIT;
+  if ((r = fido_cred_set_uv(cred, *uv)) != FIDO_OK) {
+    log_error(log, "fido_cred_set_uv (%d) %s", r, fido_strerr(r));
     goto err;
   }
 
@@ -170,30 +177,103 @@ err:
   return cred;
 }
 
-static int make_cred(const struct args *args, const char *path, fido_dev_t *dev,
+
+static int get_retry_count(const log_t *log, fido_dev_t *dev,
+                           const fido_opt_t uv, int *retry_count) {
+  int r;
+
+  *retry_count = 1;
+  if (uv == FIDO_OPT_TRUE) {
+    if ((r = fido_dev_get_uv_retry_count(dev, retry_count)) != FIDO_OK) {
+      log_error(log, "fido_dev_get_uv_retry_count: %s (%d)", fido_strerr(r), r);
+      return r;
+    }
+  }
+
+  return FIDO_OK;
+}
+
+
+static int make_cred_with_uv_retry(const log_t *log, fido_dev_t *dev, 
+                                   fido_cred_t *cred, const fido_opt_t uv,
+                                   const char* pin) {
+  int retry_count;
+  int r;
+
+  if ((r = get_retry_count(log, dev, uv, &retry_count)) != FIDO_OK)
+    return r;
+  for (int i = 0; i < retry_count; i++) {
+    log_info(log, DEFAULT_CUE " Attempt %d of %d.", i + 1, retry_count);
+    r = fido_dev_make_cred(dev, cred, pin);
+    if (r != FIDO_ERR_UV_INVALID)
+      break;
+  }
+  return r;
+}
+
+
+static int get_assert_with_uv_retry(const log_t *log, fido_dev_t *dev, 
+                                    fido_assert_t *assert, const fido_opt_t uv,
+                                    const char* pin) {
+  int retry_count;
+  int r;
+
+  if ((r = get_retry_count(log, dev, uv, &retry_count)) != FIDO_OK)
+    return r;
+  for (int i = 0; i < retry_count; i++) {
+    log_info(log, DEFAULT_CUE " Attempt %d of %d.", i + 1, retry_count);
+    r = fido_dev_get_assert(dev, assert, pin);
+    if (r != FIDO_ERR_UV_INVALID)
+      break;
+  }
+  return r;
+}
+
+
+static int make_cred(const log_t *log, const struct args *args, 
+                     const char *path, fido_dev_t *dev,
+                     char *pin, size_t pin_len, int *pin_set, fido_opt_t *uv,
                      fido_cred_t *cred, int devopts) {
   char prompt[BUFSIZE];
-  char pin[BUFSIZE];
   int n;
   int r;
 
   if (path == NULL || dev == NULL || cred == NULL) {
-    fprintf(stderr, "%s: args\n", __func__);
+    log_error(log, "%s: args", __func__);
     return -1;
   }
 
-  /* Some form of UV required; built-in UV is available. */
-  if (args->user_verification || (devopts & (UV_SET | UV_NOT_REQD)) == UV_SET) {
-    if ((r = fido_cred_set_uv(cred, FIDO_OPT_TRUE)) != FIDO_OK) {
-      fprintf(stderr, "error: fido_cred_set_uv: %s (%d)\n", fido_strerr(r), r);
+  /* Password storage requires the HMAC-secret extension. */
+  if (args->password) {
+    if ((r = fido_cred_set_extensions(cred, FIDO_EXT_HMAC_SECRET)) != FIDO_OK) {
+      log_error(log, "fido_cred_set_extensions(FIDO_EXT_HMAC_SECRET): %s (%d)", fido_strerr(r), r);
       return -1;
     }
   }
 
+  /* Some form of UV required; built-in UV is available. */
+  if (args->user_verification || (devopts & (UV_SET | UV_NOT_REQD)) == UV_SET) {
+    *uv = FIDO_OPT_TRUE;
+    if ((r = fido_cred_set_uv(cred, *uv)) != FIDO_OK) {
+      log_error(log, "fido_cred_set_uv: %s (%d)", fido_strerr(r), r);
+      return -1;
+    }
+  }
+  if (*uv == FIDO_OPT_TRUE) {
+    log_trace(log, "User verification is required");
+  } else if (*uv == FIDO_OPT_FALSE) {
+    log_trace(log, "User verification is disabled");
+  }
+ 
   /* Let built-in UV have precedence over PIN. No UV also handled here. */
   if (args->user_verification || !args->pin_verification) {
-    r = fido_dev_make_cred(dev, cred, NULL);
+    *pin_set = 0;
+    if (!args->pin_verification)
+      log_trace(log, "PIN verification is disabled");
+    log_trace(log, "Creating the credential");
+    r = make_cred_with_uv_retry(log, dev, cred, *uv, NULL);
   } else {
+    log_trace(log, "PIN verification is required");
     r = FIDO_ERR_PIN_REQUIRED;
   }
 
@@ -203,43 +283,42 @@ static int make_cred(const struct args *args, const char *path, fido_dev_t *dev,
        r == FIDO_ERR_PIN_BLOCKED)) {
     n = snprintf(prompt, sizeof(prompt), "Enter PIN for %s: ", path);
     if (n < 0 || (size_t) n >= sizeof(prompt)) {
-      fprintf(stderr, "error: snprintf prompt");
+      log_error(log, "snprintf prompt");
       return -1;
     }
-    if (!readpassphrase(prompt, pin, sizeof(pin), RPP_ECHO_OFF)) {
-      fprintf(stderr, "error: failed to read pin");
-      explicit_bzero(pin, sizeof(pin));
+    if (!readpassphrase(prompt, pin, pin_len, RPP_ECHO_OFF)) {
+      log_error(log, "failed to read pin");
       return -1;
     }
-    r = fido_dev_make_cred(dev, cred, pin);
+    *pin_set = 1;
+    r = make_cred_with_uv_retry(log, dev, cred, *uv, pin);
   }
-  explicit_bzero(pin, sizeof(pin));
 
   if (r != FIDO_OK) {
-    fprintf(stderr, "error: fido_dev_make_cred (%d) %s\n", r, fido_strerr(r));
+    log_error(log, "fido_dev_make_cred (%d) %s", r, fido_strerr(r));
     return -1;
   }
 
   return 0;
 }
 
-static int verify_cred(const fido_cred_t *const cred) {
+static int verify_cred(const log_t *log, const fido_cred_t *const cred) {
   int r;
 
   if (cred == NULL) {
-    fprintf(stderr, "%s: args\n", __func__);
+    log_error(log, "%s: args", __func__);
     return -1;
   }
 
   if (fido_cred_x5c_ptr(cred) == NULL) {
     if ((r = fido_cred_verify_self(cred)) != FIDO_OK) {
-      fprintf(stderr, "error: fido_cred_verify_self (%d) %s\n", r,
-              fido_strerr(r));
+      log_error(log, "fido_cred_verify_self (%d) %s", r,
+                fido_strerr(r));
       return -1;
     }
   } else {
     if ((r = fido_cred_verify(cred)) != FIDO_OK) {
-      fprintf(stderr, "error: fido_cred_verify (%d) %s\n", r, fido_strerr(r));
+      log_error(log, "fido_cred_verify (%d) %s", r, fido_strerr(r));
       return -1;
     }
   }
@@ -247,8 +326,10 @@ static int verify_cred(const fido_cred_t *const cred) {
   return 0;
 }
 
-static int print_authfile_line(const struct args *const args,
-                               const fido_cred_t *const cred) {
+static int print_authfile_line(const log_t *log, 
+                               const struct args *const args,
+                               const fido_cred_t *const cred,
+                               const char *encrypted_password) {
   const unsigned char *kh = NULL;
   const unsigned char *pk = NULL;
   const char *user = NULL;
@@ -259,48 +340,49 @@ static int print_authfile_line(const struct args *const args,
   int ok = -1;
 
   if ((kh = fido_cred_id_ptr(cred)) == NULL) {
-    fprintf(stderr, "error: fido_cred_id_ptr returned NULL\n");
+    log_error(log, "fido_cred_id_ptr returned NULL");
     goto err;
   }
 
   if ((kh_len = fido_cred_id_len(cred)) == 0) {
-    fprintf(stderr, "error: fido_cred_id_len returned 0\n");
+    log_error(log, "fido_cred_id_len returned 0");
     goto err;
   }
 
   if ((pk = fido_cred_pubkey_ptr(cred)) == NULL) {
-    fprintf(stderr, "error: fido_cred_pubkey_ptr returned NULL\n");
+    log_error(log, "fido_cred_pubkey_ptr returned NULL");
     goto err;
   }
 
   if ((pk_len = fido_cred_pubkey_len(cred)) == 0) {
-    fprintf(stderr, "error: fido_cred_pubkey_len returned 0\n");
+    log_error(log, "fido_cred_pubkey_len returned 0");
     goto err;
   }
 
   if (!b64_encode(kh, kh_len, &b64_kh)) {
-    fprintf(stderr, "error: failed to encode key handle\n");
+    log_error(log, "failed to encode key handle");
     goto err;
   }
 
   if (!b64_encode(pk, pk_len, &b64_pk)) {
-    fprintf(stderr, "error: failed to encode public key\n");
+    log_error(log, "failed to encode public key");
     goto err;
   }
 
   if (!args->nouser) {
     if ((user = fido_cred_user_name(cred)) == NULL) {
-      fprintf(stderr, "error: fido_cred_user_name returned NULL\n");
+      log_error(log, "fido_cred_user_name returned NULL");
       goto err;
     }
     printf("%s", user);
   }
 
-  printf(":%s,%s,%s,%s%s%s", args->resident ? "*" : b64_kh, b64_pk,
+  printf(":%s,%s,%s,%s%s%s,%s", args->resident ? "*" : b64_kh, b64_pk,
          cose_string(fido_cred_type(cred)),
          !args->no_user_presence ? "+presence" : "",
          args->user_verification ? "+verification" : "",
-         args->pin_verification ? "+pin" : "");
+         args->pin_verification ? "+pin" : "",
+         encrypted_password ? encrypted_password : "*");
 
   ok = 0;
 
@@ -311,7 +393,7 @@ err:
   return ok;
 }
 
-static int get_device_options(fido_dev_t *dev, int *devopts) {
+static int get_device_options(const log_t *log, fido_dev_t *dev, int *devopts) {
   char *const *opts;
   const bool *vals;
   fido_cbor_info_t *info;
@@ -323,11 +405,11 @@ static int get_device_options(fido_dev_t *dev, int *devopts) {
     return 0;
 
   if ((info = fido_cbor_info_new()) == NULL) {
-    fprintf(stderr, "fido_cbor_info_new failed\n");
+    log_error(log, "fido_cbor_info_new failed");
     return -1;
   }
   if ((r = fido_dev_get_cbor_info(dev, info)) != FIDO_OK) {
-    fprintf(stderr, "fido_dev_get_cbor_info: %s (%d)\n", fido_strerr(r), r);
+    log_error(log, "fido_dev_get_cbor_info: %s (%d)", fido_strerr(r), r);
     fido_cbor_info_free(&info);
     return -1;
   }
@@ -355,7 +437,7 @@ static void parse_args(int argc, char *argv[], struct args *args) {
     OPT_VERSION = 0x100,
   };
   /* clang-format off */
-  static const struct option options[] = {
+  const struct option options[] = {
     { "help",              no_argument,       NULL, 'h'         },
     { "version",           no_argument,       NULL, OPT_VERSION },
     { "origin",            required_argument, NULL, 'o'         },
@@ -364,11 +446,12 @@ static void parse_args(int argc, char *argv[], struct args *args) {
     { "resident",          no_argument,       NULL, 'r'         },
     { "no-user-presence",  no_argument,       NULL, 'P'         },
     { "pin-verification",  no_argument,       NULL, 'N'         },
-    { "user-verification", no_argument,       NULL, 'V'         },
+    { "user-verification", optional_argument, NULL, 'V'         },
     { "debug",             no_argument,       NULL, 'd'         },
     { "verbose",           no_argument,       NULL, 'v'         },
     { "username",          required_argument, NULL, 'u'         },
     { "nouser",            no_argument,       NULL, 'n'         },
+    { "password",          no_argument,       NULL, 'p'         },
     { 0,                   0,                 0,    0           }
   };
   const char *usage =
@@ -395,11 +478,13 @@ static void parse_args(int argc, char *argv[], struct args *args) {
 "                             authenticator, defaults to the current user name\n"
 "  -n, --nouser             Print only registration information (key handle,\n"
 "                             public key, and options), useful for appending\n"
+"  -p, --password           Store an encrypted password with the credential.\n"
+"                           The password will be attached to the PAM stack as\n"
+"                           an auth token. Useful for unlocking keyrings.\n"
 "\n"
 "Report bugs at <" PACKAGE_BUGREPORT ">.\n";
   /* clang-format on */
-
-  while ((c = getopt_long(argc, argv, "ho:i:t:rPNVdvu:n", options, NULL)) !=
+  while ((c = getopt_long(argc, argv, "ho:i:t:rPNVdvu:np", options, NULL)) !=
          -1) {
     switch (c) {
       case 'h':
@@ -438,6 +523,9 @@ static void parse_args(int argc, char *argv[], struct args *args) {
       case 'n':
         args->nouser = 1;
         break;
+      case 'p':
+        args->password = 1;
+        break;
       case OPT_VERSION:
         printf("pamu2fcfg " PACKAGE_VERSION "\n");
         exit(EXIT_SUCCESS);
@@ -455,35 +543,48 @@ static void parse_args(int argc, char *argv[], struct args *args) {
 int main(int argc, char *argv[]) {
   int exit_code = EXIT_FAILURE;
   struct args args = {0};
+  log_t *log = NULL;
   fido_cred_t *cred = NULL;
+  fido_assert_t *assert = NULL;
   fido_dev_info_t *devlist = NULL;
   fido_dev_t *dev = NULL;
   const fido_dev_info_t *di = NULL;
   const char *path = NULL;
+  char pin[BUFSIZE];
+  int pin_set;
+  fido_opt_t up;
+  fido_opt_t uv;
+  char password[BUFSIZE];
+  unsigned char hmac_salt[HMAC_SALT_LENGTH];
+  char *encrypted_password = NULL;
   size_t ndevs = 0;
   int devopts = 0;
   int r;
+  size_t n;
 
   parse_args(argc, argv, &args);
   fido_init(args.debug ? FIDO_DEBUG : 0);
 
+  log = log_create_file(
+    args.debug || args.verbose ? log_level_trace : log_level_info, NULL, stderr);
+
   devlist = fido_dev_info_new(DEVLIST_LEN);
   if (!devlist) {
-    fprintf(stderr, "error: fido_dev_info_new failed\n");
+    log_error(log, "fido_dev_info_new failed");
     goto err;
   }
 
   r = fido_dev_info_manifest(devlist, DEVLIST_LEN, &ndevs);
   if (r != FIDO_OK) {
-    fprintf(stderr, "Unable to discover FIDO authenticator(s), %s (%d)\n",
+    log_error(log, "Unable to discover FIDO authenticator(s), %s (%d)",
             fido_strerr(r), r);
     goto err;
   }
 
   if (ndevs == 0) {
     for (int i = 0; i < TIMEOUT; i += FREQUENCY) {
-      fprintf(stderr,
-              "\rNo FIDO authenticator available, please insert one now, you "
+      log_info(log, 
+              "No FIDO authenticator available, please insert one now, you "
               "have %2d seconds",
               TIMEOUT - i);
       fflush(stderr);
@@ -491,84 +592,154 @@ int main(int argc, char *argv[]) {
 
       r = fido_dev_info_manifest(devlist, DEVLIST_LEN, &ndevs);
       if (r != FIDO_OK) {
-        fprintf(stderr, "\nUnable to discover FIDO authenticator(s), %s (%d)\n",
+        log_error(log, "Unable to discover FIDO authenticator(s), %s (%d)",
                 fido_strerr(r), r);
         goto err;
       }
 
       if (ndevs != 0) {
-        fprintf(stderr, "\nFIDO authenticator found!\n");
+        log_info(log, "FIDO authenticator found!");
         break;
       }
     }
   }
 
   if (ndevs == 0) {
-    fprintf(stderr, "\rNo FIDO authenticator found. Aborting.                  "
-                    "                   \n");
+    log_error(log, "No FIDO authenticator found. Aborting.");
     goto err;
   }
 
   /* XXX loop over every device? */
   dev = fido_dev_new();
   if (!dev) {
-    fprintf(stderr, "fido_dev_new failed\n");
+    log_error(log, "fido_dev_new failed");
     goto err;
   }
 
   di = fido_dev_info_ptr(devlist, 0);
   if (!di) {
-    fprintf(stderr, "error: fido_dev_info_ptr returned NULL\n");
+    log_error(log, "fido_dev_info_ptr returned NULL");
     goto err;
   }
 
   if ((path = fido_dev_info_path(di)) == NULL) {
-    fprintf(stderr, "error: fido_dev_path returned NULL\n");
+    log_error(log, "fido_dev_path returned NULL");
     goto err;
   }
 
   r = fido_dev_open(dev, path);
   if (r != FIDO_OK) {
-    fprintf(stderr, "error: fido_dev_open (%d) %s\n", r, fido_strerr(r));
+    log_error(log, "fido_dev_open (%d) %s", r, fido_strerr(r));
     goto err;
   }
 
-  if (get_device_options(dev, &devopts) != 0) {
+  if (get_device_options(log, dev, &devopts) != 0) {
     goto err;
   }
   if (args.pin_verification && !(devopts & PIN_SET)) {
-    warnx("%s", devopts & PIN_UNSET
-                  ? "FIDO authenticator has no PIN"
-                  : "FIDO authenticator does not support PIN");
+    log_error(log, "%s", devopts & PIN_UNSET
+                          ? "FIDO authenticator has no PIN"
+                          : "FIDO authenticator does not support PIN");
     goto err;
   }
   if (args.user_verification && !(devopts & UV_SET)) {
-    warnx("%s",
+    log_error(log, "%s",
           devopts & UV_UNSET
             ? "FIDO authenticator has no built-in user verification configured"
             : "FIDO authenticator does not support built-in user verification");
     goto err;
   }
   if ((devopts & (UV_REQD | PIN_SET | UV_SET)) == UV_REQD) {
-    warnx("%s", "some form of user verification required but none configured");
+    log_error(log, "%s", "some form of user verification required but none configured");
     goto err;
   }
 
-  if ((cred = prepare_cred(&args)) == NULL)
+  if ((cred = prepare_cred(log, &args, &uv)) == NULL)
     goto err;
 
-  if (make_cred(&args, path, dev, cred, devopts) != 0 ||
-      verify_cred(cred) != 0 || print_authfile_line(&args, cred) != 0)
+  if (make_cred(log, &args, path, dev, pin, sizeof(pin), &pin_set, &uv, cred, devopts) != 0 ||
+      verify_cred(log, cred) != 0)
+    goto err;
+
+  log_trace(log, "Created %sresident credential", args.resident ? "" : "non-");
+
+  if (args.password) {
+    up = args.no_user_presence != 0 ? FIDO_OPT_TRUE : FIDO_OPT_OMIT;
+
+    if (!generate_hmac_salt(log, hmac_salt))
+      goto err;
+
+    assert = prepare_assert(log, fido_cred_rp_name(cred),
+      fido_cred_id_ptr(cred), fido_cred_id_len(cred), up, uv);
+    if (!assert)
+      goto err;
+
+    r = fido_assert_set_extensions(assert, FIDO_EXT_HMAC_SECRET);
+    if (r != FIDO_OK) {
+      log_error(log, "fido_assert_set_extensions(FIDO_EXT_HMAC_SECRET): %s (%d)", 
+        fido_strerr(r), r);
+      goto err;
+    }
+
+    r = fido_assert_set_hmac_salt(assert, hmac_salt, sizeof(hmac_salt));
+    if (r != FIDO_OK) {
+      log_error(log, "fido_assert_set_hmac_salt: %s (%d)", fido_strerr(r), r);
+      goto err;
+    }
+
+    if (!readpassphrase("Enter a password to store with this credential: ", password, sizeof(password), RPP_ECHO_OFF)) {
+      log_error(log, "failed to read password");
+      goto err;
+    }
+
+    log_trace(log, "Accessing the credential to use it for password encryption");
+
+    r = get_assert_with_uv_retry(log, dev, assert, uv, pin_set ? pin : NULL);
+    if (r != FIDO_OK) {
+      log_error(log, "fido_dev_get_assert: %s (%d)", fido_strerr(r), r);
+      goto err;
+    }
+
+    n = fido_assert_count(assert);
+    if (n != 1) {
+      log_error(log, "fido_assert_count() returned %zu, expected 1", n);
+      goto err;
+    }
+
+    r = fido_assert_verify(assert, 0, fido_cred_type(cred), fido_cred_pubkey_ptr(cred));
+    if (r != FIDO_OK) {
+      log_error(log, "fido_assert_verify: %s (%d)", fido_strerr(r), r);
+      goto err;
+    }
+
+    if (!encrypt_password(
+        log, 
+        fido_cred_user_name(cred),
+        fido_cred_id_ptr(cred),
+        fido_cred_id_len(cred),
+        hmac_salt,
+        fido_assert_hmac_secret_ptr(assert, 0),
+        fido_assert_hmac_secret_len(assert, 0),
+        password,
+        &encrypted_password))
+      goto err;
+  }
+
+  if (print_authfile_line(log, &args, cred, encrypted_password) != 0)
     goto err;
 
   exit_code = EXIT_SUCCESS;
 
 err:
+  free(encrypted_password);
+  explicit_bzero(password, sizeof(password));
+  explicit_bzero(pin, sizeof(pin));
   if (dev != NULL)
     fido_dev_close(dev);
   fido_dev_info_free(&devlist, ndevs);
+  fido_assert_free(&assert);
   fido_cred_free(&cred);
   fido_dev_free(&dev);
-
+  log_free(log);
   exit(exit_code);
 }

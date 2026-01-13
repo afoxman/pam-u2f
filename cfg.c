@@ -7,6 +7,7 @@
 #include <fcntl.h>
 #include <stdlib.h>
 #include <string.h>
+#include <syslog.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -20,7 +21,7 @@ static void cfg_load_arg_debug(cfg_t *cfg, const char *arg) {
     cfg->debug = 1;
   else if (strncmp(arg, "debug_file=", strlen("debug_file=")) == 0) {
     debug_close(cfg->debug_file);
-    cfg->debug_file = debug_open(arg + strlen("debug_file="));
+    cfg->debug_file = debug_open(arg + strlen("debug_file="));    
   }
 }
 
@@ -245,11 +246,10 @@ static void cfg_reset(cfg_t *cfg) {
   cfg->pinverification = -1;
 }
 
-int cfg_init(cfg_t *cfg, int flags, int argc, const char **argv) {
+int cfg_init(cfg_t *cfg, int flags, int argc, const char **argv, 
+    const char *log_prefix) {
   int i, r;
   const char *config_path = NULL;
-
-  (void) flags; /* prevent unused warning when unit-testing. */
 
   cfg_reset(cfg);
 
@@ -266,6 +266,15 @@ int cfg_init(cfg_t *cfg, int flags, int argc, const char **argv) {
 
   for (i = 0; i < argc; i++)
     cfg_load_arg(cfg, argv[i]);
+
+  // Create the log. If PAM_SILENT is set, we can't write to the terminal.
+  bool is_terminal = cfg->debug_file == stdout || cfg->debug_file == stderr;
+  if (0 == (flags & PAM_SILENT) || !is_terminal) {
+    log_level_t min_level = cfg->debug ? log_level_trace : log_level_info;
+    cfg->log = cfg->debug_file ?
+      log_create_file(min_level, log_prefix, cfg->debug_file) :
+      log_create_syslog(min_level, log_prefix, LOG_AUTHPRIV);
+  }
 
 exit:
   if (cfg->debug) {
@@ -303,6 +312,7 @@ exit:
 }
 
 void cfg_free(cfg_t *cfg) {
+  log_free(cfg->log);
   debug_close(cfg->debug_file);
   free(cfg->defaults_buffer);
   cfg_reset(cfg);

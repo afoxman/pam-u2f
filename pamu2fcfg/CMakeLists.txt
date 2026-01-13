@@ -6,7 +6,9 @@ add_executable(pamu2fcfg
 	readpassphrase.c
 	../util.c
 	../b64.c
+	../crypt.c
 	../explicit_bzero.c
+	../log.c
 )
 
 target_link_libraries(pamu2fcfg PRIVATE
